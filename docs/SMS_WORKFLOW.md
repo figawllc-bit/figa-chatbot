@@ -54,7 +54,9 @@ Migration `20261115000300_bot_mode.sql` (pending, offline only) adds one global 
 
 ## Activation is still blocked
 
-All production code is written and tested offline; nothing real runs until the reviewed code locks are flipped and the approvals and credentials below exist. The deployed bootstrap remains unchanged and disabled. No sending scope, credentials, Cron, public route or coworker configuration was changed.
+All production code is written and tested offline; nothing real runs until the reviewed code locks are flipped and the approvals and credentials below exist. No sending scope, credentials, public route or coworker configuration was changed.
+
+**Deployed state (2026-11-15):** the production configuration is deployed as `figa-chatbot`, version `5888d828`, with every lock and switch off, no secrets, and no public URL. Its every-minute schedule was verified live: each run ends "ok" with no exceptions, no logs and no outside requests. Roll back with `npx wrangler rollback --env production` if ever needed.
 
 **How the production path works** (all locked off):
 - **Database:** the same migrations serve a SEPARATE production Supabase project. Migration `0500` adds a deployment profile. Development (the default) accepts only fixtures; production accepts only real rows with FIGA's configured RingCentral account, extension and number. `supabase/production/configure.sql` switches a fresh, empty project once and can never be reversed. The development project must never be switched.
@@ -81,9 +83,13 @@ All production code is written and tested offline; nothing real runs until the r
 6. Extension 102 stays out of scope until separately authorized.
 
 **C. Production database**
-1. Create a separate Supabase project (with BAA if decision A requires it). Apply every file in `supabase/migrations/` in order.
-2. Run `supabase/production/configure.sql` with the account ID and sender number, before any conversation exists.
-3. Add verified staff to `staff_roster`; grant `bot_mode` only to people who should switch the bot.
+1. Create a NEW, separate Supabase project, e.g. `figa-chatbot-prod` (with Supabase's HIPAA add-on/BAA if decision A requires it). Never reuse the development project.
+2. Run `npm run production:sql`; paste the generated `.wrangler/production-setup.sql` (all migrations in order) into the new project's SQL Editor and run it once.
+3. Fill in and run `supabase/production/configure.sql` (account ID and sender number) before any conversation exists. The bot starts Paused.
+4. For each verified staff member, fill in and run `supabase/production/add_staff.sql`; grant `bot_mode` only to people who should switch the bot. Each person opens a private chat with the bot and presses Start.
+5. Settings → API Keys: create a server secret key (`sb_secret_…`) and store it only with `npx wrangler secret put SUPABASE_PRODUCTION_SECRET_KEY --env production` (it prompts for the value; never paste it into chat or files).
+
+This exact sequence (bundle → configure → add staff → staff `/status`) is verified on a local database.
 
 **D. Cloudflare** (everything is prepared in `wrangler.jsonc` `env.production`; deploy with `--env production`)
 1. Upgrade to Workers Paid (recommended). Free allows 10 ms CPU per invocation (including Cron), 100,000 requests/day, 5 Cron Triggers, and 10,000 Workers AI neurons/day. Gemma 4 26B costs 9,091 neurons per million input tokens and 27,273 per million output tokens, so roughly 19 neurons per turn (assuming about 1,500 input and 200 output tokens). That gives about 500 turns/day, which 200 contacts with several turns each can exceed.
