@@ -8,6 +8,7 @@ import { RINGCENTRAL_POLLING_LIVE_ENABLED, RINGCENTRAL_PRODUCTION_PROCESSING_ENA
 import type { MonitoringEnvironment } from '../ringcentral/polling-runtime';
 import { RINGCENTRAL_SMS_DELIVERY_ENABLED, RingCentralSmsSender } from '../ringcentral/sms-sender';
 import { exchangeSmsJwt, type SmsGrant } from '../ringcentral/oauth-read-session';
+import { ReadOnlyTestError } from '../ringcentral/read-only-test';
 import { SmsWorkflow, productionSmsRepository } from '../ringcentral/sms-workflow';
 import type { RingCentralScope } from '../ringcentral/events';
 import { productionDatabaseConfiguration, type ProductionDatabaseEnvironment } from '../database/config';
@@ -100,6 +101,19 @@ function cachedSmsGrant(env: ProductionEnvironment, http: typeof fetch): () => P
       { host: HOST, extensionId: POLLING_OWNER_ID }, { send: request => http(request) }, { authorizedMaximum: 1, async reserve() {} });
     return grant;
   };
+}
+
+/** Signs in with the SMS app only (never sends). Returns 'ok', 'missing' or the failure category. */
+export async function verifySmsApp(env: ProductionEnvironment, http: typeof fetch = workerFetch): Promise<string> {
+  if (!has(env.RINGCENTRAL_SMS_CLIENT_ID) || !has(env.RINGCENTRAL_SMS_CLIENT_SECRET) || !has(env.RINGCENTRAL_SMS_JWT)) return 'missing';
+  // Comparisons only (true/false), never values: catches the read-only app's credentials stored by mistake.
+  const same = `sameClientAsReadOnly=${env.RINGCENTRAL_SMS_CLIENT_ID === env.RINGCENTRAL_CLIENT_ID} sameJwtAsReadOnly=${env.RINGCENTRAL_SMS_JWT === env.RINGCENTRAL_JWT}`;
+  try { await cachedSmsGrant(env, http)(); return 'ok'; }
+  catch (error) {
+    if (!(error instanceof ReadOnlyTestError)) return 'sign_in_failed';
+    const granted = (error as ReadOnlyTestError & { grantedScope?: string }).grantedScope;
+    return error.category + (granted !== undefined ? ` (granted: ${granted || 'none'}; ${same})` : error.httpStatus ? ` (HTTP ${error.httpStatus}${error.oauthErrorCode ? ' ' + error.oauthErrorCode : ''}; ${same})` : ` (${same})`);
+  }
 }
 
 /** The live workflow, or null while anything required for processing is missing. Sending has its own gates in the sender. */

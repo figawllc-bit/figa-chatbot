@@ -19,8 +19,9 @@ const full: ProductionEnvironment = {
 };
 
 describe('production wiring: reading approved in code, sending still locked; env approvals gate everything', () => {
-  it('reading locks are on (stage 2); the sending lock stays off until the test text', () => {
-    expect([RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED, RINGCENTRAL_POLLING_LIVE_ENABLED, RINGCENTRAL_SMS_DELIVERY_ENABLED]).toEqual([true, true, false]);
+  it('reading and sending are approved in code; env switches and approvals still gate them', () => {
+    expect([RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED, RINGCENTRAL_POLLING_LIVE_ENABLED, RINGCENTRAL_SMS_DELIVERY_ENABLED]).toEqual([true, true, true]);
+    expect(productionReadiness({ ...full, RINGCENTRAL_SMS_SENDING_ENABLED: 'false' }).sending).toContain('var: RINGCENTRAL_SMS_SENDING_ENABLED');
   });
   it('an empty environment lists every missing approval, switch and credential by name', () => {
     const r = productionReadiness({});
@@ -32,7 +33,7 @@ describe('production wiring: reading approved in code, sending still locked; env
   it('with everything configured, processing is ready and only the sending code lock blocks sending; values never appear', () => {
     const r = productionReadiness(full);
     expect(r.processing).toEqual([]);
-    expect(r.sending).toEqual(['code: RINGCENTRAL_SMS_DELIVERY_ENABLED is false']);
+    expect(r.sending).toEqual([]);
     expect(r.ai).toEqual([]); expect(r.telegram).toEqual([]);
     expect(JSON.stringify(r)).not.toMatch(/fictional|sb_secret|400123456|5415550100|1234567/);
   });
@@ -91,5 +92,29 @@ describe('production transport', () => {
       expect(url).toBe('https://figaprod01.supabase.co/rest/v1/rpc/figa_rc_sms_pending');
       expect(init.method).toBe('POST'); expect((init.headers as Record<string, string>).apikey).toBe('sb_secret_inert_test_fixture'); expect(init.body).toBe('{}');
     } finally { spy.mockRestore(); }
+  });
+});
+
+describe('one RingCentral app for reading and replying', () => {
+  const iso = (n: number) => new Date(n).toISOString();
+  const run = async (grantedScope: string, appPermissions: readonly ['ReadMessages'] | readonly ['ReadMessages', 'SMS']) => {
+    const now = Date.now(), old = iso(now - 600000);
+    let state = { version: 1 as const, baselineAt: old, completedThrough: old, lastAttemptAt: old, lastSuccessfulCheck: null, notBefore: null, authBlocked: false, seen: [] as { hash: string; createdAt: string }[] };
+    const store = { async exclusive<T>(_k: string, work: (s: typeof state, save: (n: typeof state) => Promise<void>) => Promise<T>) { return work(state, async n => { state = n; }); } };
+    const http = vi.fn(async (r: Request) => r.url.endsWith('/restapi/oauth/token')
+      ? Response.json({ access_token: 'fictional-access', token_type: 'bearer', expires_in: 3600, scope: grantedScope, owner_id: POLLING_OWNER_ID })
+      : Response.json({ records: [], paging: { page: 1, perPage: 20, totalPages: 1 } }));
+    const poller = new RingCentralIncomingPoller({ mode: 'live', store: store as never, http, controls: () => ({ enabled: true, paused: false }),
+      credentials: async () => ({ kind: 'jwt', clientId: 'fictional-client', clientSecret: 'fictional-secret', jwt: 'fictional.header.signature', host: 'https://platform.ringcentral.com', accountId: '~', extensionId: POLLING_OWNER_ID, appPermissions }),
+      approval: { operation: 'receive_only_polling', ownerId: POLLING_OWNER_ID, host: 'https://platform.ringcentral.com', permissions: ['ReadMessages'], expiresAt: iso(now + 86400000), productionMetadataStoreApproved: true } });
+    return poller.poll();
+  };
+  it('reads with an app granted exactly Read Messages + SMS', async () => {
+    expect(await run('ReadMessages SMS', ['ReadMessages', 'SMS'])).toMatchObject({ status: 'ok', errors: 0 });
+  });
+  it('refuses extra permissions, and a read-only configuration still refuses SMS scope', async () => {
+    expect(await run('ReadMessages SMS EditExtensions', ['ReadMessages', 'SMS'])).toMatchObject({ status: 'error', errorCategory: 'scope_rejected' });
+    expect(await run('ReadMessages SMS', ['ReadMessages'])).toMatchObject({ status: 'error', errorCategory: 'scope_rejected' });
+    expect(await run('ReadMessages', ['ReadMessages'])).toMatchObject({ status: 'ok' });
   });
 });

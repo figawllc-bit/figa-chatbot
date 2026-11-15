@@ -2,7 +2,9 @@ import { isOfflineExecutor, type HttpsExecutor } from './secure-transport';
 import { isVerifiedSmsGrant, type SmsGrant } from './oauth-read-session';
 import { POLLING_OWNER_ID } from './polling';
 
-export const RINGCENTRAL_SMS_DELIVERY_ENABLED = false;
+// Sending approved by FIGA on 2026-11-15. Env switches, privacy approval, bot mode, opt-outs and staff
+// ownership are still checked right before every SMS POST.
+export const RINGCENTRAL_SMS_DELIVERY_ENABLED = true;
 export interface SmsPayload { from: string; to: string; text: string }
 export type SmsResult = { kind: 'accepted'; messageId: string } | { kind: 'suppressed' | 'uncertain' | 'failed'; category: string; httpStatus?: number };
 export interface SmsSender { send(payload: SmsPayload, authorize: () => Promise<boolean>): Promise<SmsResult> }

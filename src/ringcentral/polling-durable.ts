@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { RingCentralIncomingPoller, POLLING_OWNER_ID, RINGCENTRAL_POLLING_LIVE_ENABLED, pollingControls, validatePollState,
   type PollState, type PollingStateStore, type PollingApproval, type PollReport } from './polling';
 import { monitoringCredentials } from './polling-runtime';
-import { productionScope, productionStaffBot, productionWorkflow, type ProductionEnvironment } from '../production/runtime';
+import { productionScope, productionStaffBot, productionWorkflow, verifySmsApp, type ProductionEnvironment } from '../production/runtime';
 import { TelegramPoller } from '../telegram/ingress';
 import { TelegramTransportError } from '../telegram/transport';
 import { DatabaseError } from '../database/supabase';
@@ -37,7 +37,7 @@ export class DurablePollingStore implements PollingStateStore {
   }
 }
 
-export interface StaffPollReport { status: 'disabled' | 'ok' | 'error'; processed: number; failure?: 'telegram' | 'database' | 'other'; httpStatus?: number | null; code?: string | null; keyCheck?: number | null; bot?: string | null; webhookSet?: boolean | null; results?: Record<string, number> }
+export interface StaffPollReport { status: 'disabled' | 'ok' | 'error'; processed: number; failure?: 'telegram' | 'database' | 'other'; httpStatus?: number | null; code?: string | null; keyCheck?: number | null; bot?: string | null; webhookSet?: boolean | null; smsApp?: string; results?: Record<string, number> }
 export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
   private poller?: RingCentralIncomingPoller;
   private botIdentityLogged = false;
@@ -68,13 +68,14 @@ export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
         if (next !== offset) await this.ctx.storage.put('telegram-offset', next);
         // Once per isolate: which bot this token belongs to (public username) and whether a webhook
         // would divert updates, so staff can confirm they are messaging the right bot.
-        let bot: string | null | undefined, webhookSet: boolean | null | undefined;
+        let bot: string | null | undefined, webhookSet: boolean | null | undefined, smsApp: string | undefined;
         if (!this.botIdentityLogged) {
           this.botIdentityLogged = true;
           try { bot = '@' + (await staff.transport.getMe()).username; } catch { bot = null; }
           try { webhookSet = (await staff.transport.getWebhookInfo()).url !== ''; } catch { webhookSet = null; }
+          smsApp = await verifySmsApp(this.env); // sign-in check only; never sends
         }
-        return { status: 'ok' as const, processed: next - offset, results, ...(bot !== undefined ? { bot, webhookSet } : {}) };
+        return { status: 'ok' as const, processed: next - offset, results, ...(bot !== undefined ? { bot, webhookSet, smsApp } : {}) };
       } catch (error) {
         // Category only. No Telegram bodies, tokens or database responses in logs.
         const failure = error instanceof TelegramTransportError ? 'telegram' as const : error instanceof DatabaseError ? 'database' as const : 'other' as const;

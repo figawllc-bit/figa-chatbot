@@ -270,8 +270,10 @@ test('SMS detection to persisted Gemma intake and guarded SMS POST, fictional on
   });
   await t.test('unapproved real-like material and live sender cannot touch credentials or network',async()=>{
    const m=observe();await assert.rejects(new app.SyntheticSmsWorkflow(repo,engine(),sender().s,()=>controls).process({...m,text:'unapproved customer material'}));
-   let accessed=0;const live=new app.RingCentralSmsSender({mode:'live',sender:'+15035550100',enabled:()=>true,privacyApproved:()=>true,http:async()=>{accessed++;throw Error();},grant:async()=>{accessed++;throw Error();}});
-   assert.equal((await live.send({from:'+15035550100',to:'+15035550110',text:'fictional'},async()=>true)).category,'sending_disabled');assert.equal(accessed,0);assert.equal(app.RINGCENTRAL_SMS_DELIVERY_ENABLED,false);
+   // Sending is approved in code; a live sender still touches nothing unless BOTH the sending switch and privacy approval are on.
+   let accessed=0;const make=(enabled,privacy)=>new app.RingCentralSmsSender({mode:'live',sender:'+15035550100',enabled:()=>enabled,privacyApproved:()=>privacy,http:async()=>{accessed++;throw Error();},grant:async()=>{accessed++;throw Error();}});
+   for(const [e,p] of [[false,true],[true,false],[false,false]])assert.equal((await make(e,p).send({from:'+15035550100',to:'+15035550110',text:'fictional'},async()=>true)).category,'sending_disabled');
+   assert.equal(accessed,0);assert.equal(app.RINGCENTRAL_SMS_DELIVERY_ENABLED,true);
   });
   assert.equal(network,0);
  } finally {Date.now=originalNow;globalThis.fetch=originalFetch;await db.close();}

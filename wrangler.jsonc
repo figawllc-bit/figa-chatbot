@@ -49,8 +49,10 @@
 				"RINGCENTRAL_ACCOUNT_ID": "3322425015",
 				// FIGA business numbers on extension 101 (public); replies go out from the number the customer texted.
 				"RINGCENTRAL_SMS_NUMBERS": "+15039057215,+15039051648",
-				// Sending stays OFF until the SMS app exists and one test text to a staff phone succeeds.
-				"RINGCENTRAL_SMS_SENDING_ENABLED": "false",
+				// Sending ON (approved). Replies go out only when staff set Away/Auto in Telegram; Paused/On Duty send nothing.
+				"RINGCENTRAL_SMS_SENDING_ENABLED": "true",
+				// One RingCentral app ("FIGA Chatbot Read-Only") holds exactly Read Messages + SMS.
+				"RINGCENTRAL_APP_HAS_SMS": "false",
 				"RINGCENTRAL_OFFLINE_ENABLED": "false",
 				"AI_GLOBAL_PAUSED": "false",
 				"AI_ENABLED": "true",

@@ -7,7 +7,7 @@ import { SingleMessageReadOnlyTestClient, ReadOnlyTestError, validateSingleMessa
 interface CredentialBinding {
   host: SingleMessageApproval['host']; accountId: string; extensionId: string;
   // Provider assertion only, never independent evidence of actual app permissions.
-  appPermissions: readonly ['ReadMessages'];
+  appPermissions: readonly ['ReadMessages'] | readonly ['ReadMessages', 'SMS'];
 }
 export type InjectedRingCentralCredentials = CredentialBinding & (
   { kind: 'jwt'; clientId: string; clientSecret: string; jwt: string } |
@@ -21,7 +21,11 @@ export interface OAuthTokenTransport { send(request: Request, kind: 'oauth'): Pr
 const printable = (value: unknown, maximum: number): value is string => typeof value === 'string' && value.length > 0 && value.length <= maximum && /^[\x21-\x7e]+$/.test(value);
 function onlyReadMessages(value: unknown): boolean { return typeof value === 'string' && value.trim() === 'ReadMessages'; }
 function validateGrant(token: unknown, tokenType: unknown, scope: unknown, owner: unknown, expiresAt: number, a: OAuthReadTarget, sending = false): ReadGrant {
-  if (!(sending ? typeof scope === 'string' && scope.trim().split(/\s+/).sort().join(' ') === 'ReadMessages SMS' : onlyReadMessages(scope))) throw new ReadOnlyTestError('scope_rejected');
+  if (!(sending ? typeof scope === 'string' && scope.trim().split(/\s+/).sort().join(' ') === 'ReadMessages SMS' : onlyReadMessages(scope))) {
+    // Permission NAMES only (e.g. 'ReadAccounts SMS'), so an operator can fix the app's permissions.
+    const names = typeof scope === 'string' ? scope.trim().split(/\s+/).filter(n => /^[A-Za-z]{2,40}$/.test(n)).sort().slice(0, 30).join(' ') : '';
+    throw Object.assign(new ReadOnlyTestError('scope_rejected'), { grantedScope: names });
+  }
   if (typeof owner !== 'string' || !/^[1-9]\d{0,63}$/.test(owner) || (owner !== a.extensionId && !(a.extensionId === '~' && a.allowAuthenticatedOwnerAlias === true))) throw new ReadOnlyTestError('owner_mismatch');
   if (!printable(token, 8192) || typeof tokenType !== 'string' || tokenType.toLowerCase() !== 'bearer') throw new ReadOnlyTestError('credentials_invalid');
   // Enough lifetime for the whole bounded read; never refresh automatically.

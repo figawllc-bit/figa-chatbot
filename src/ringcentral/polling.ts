@@ -1,4 +1,4 @@
-import { exchangeReadOnlyJwt, type ReadGrant, type RuntimeCredentialProvider } from './oauth-read-session';
+import { exchangeReadOnlyJwt, exchangeSmsJwt, type ReadGrant, type RuntimeCredentialProvider } from './oauth-read-session';
 import { isOfflineCredentialProvider } from './offline-credentials';
 import { isOfflineExecutor, type HttpsExecutor } from './secure-transport';
 import { ReadOnlyTestError, READ_DEADLINE_MS } from './read-only-test';
@@ -89,9 +89,17 @@ export class RingCentralIncomingPoller {
     const c = await this.o.credentials();
     this.#guard();
     if (c.kind !== 'jwt' || c.host !== HOST || c.extensionId !== this.#owner() ||
-      (this.o.mode === 'offline' ? c.accountId !== '100001' : c.accountId !== '~') || JSON.stringify(c.appPermissions) !== '["ReadMessages"]') fail('credentials_invalid');
+      (this.o.mode === 'offline' ? c.accountId !== '100001' : c.accountId !== '~')) fail('credentials_invalid');
+    // Live only: one RingCentral app may hold exactly Read Messages + SMS (reading and replying).
+    // RingCentral's granted scope must then be exactly those two; anything more is refused.
+    const permissions = JSON.stringify(c.appPermissions);
+    const combined = this.o.mode === 'live' && permissions === '["ReadMessages","SMS"]';
+    if (!combined && permissions !== '["ReadMessages"]') fail('credentials_invalid');
     let reserved = false;
-    const grant = await exchangeReadOnlyJwt(c, { host: HOST, extensionId: this.#owner() }, { send }, { authorizedMaximum: 1, async reserve() { if (reserved) fail('budget_unavailable'); reserved = true; } });
+    const budget = { authorizedMaximum: 1 as const, async reserve() { if (reserved) fail('budget_unavailable'); reserved = true; } };
+    const target = { host: HOST, extensionId: this.#owner() } as const;
+    const grant = combined ? await exchangeSmsJwt({ ...c, appPermissions: ['ReadMessages', 'SMS'] }, target, { send }, budget)
+      : await exchangeReadOnlyJwt(c, target, { send }, budget);
     if (this.o.mode === 'offline' && grant.accessToken !== 'fictional-issued-access-token') fail('credentials_invalid');
     this.#guard(); this.#grant = grant; return grant;
   }
