@@ -54,39 +54,49 @@ Migration `20261115000300_bot_mode.sql` (pending, offline only) adds one global 
 
 ## Activation is still blocked
 
-The deployed bootstrap remains unchanged and disabled. `RINGCENTRAL_SMS_DELIVERY_ENABLED` and `RINGCENTRAL_POLLING_LIVE_ENABLED` are source constants set to `false`. No env var or secret can override them. No sending scope, credentials, Cron, public route or coworker configuration was changed.
+All production code is written and tested offline; nothing real runs until the reviewed code locks are flipped and the approvals and credentials below exist. The deployed bootstrap remains unchanged and disabled. No sending scope, credentials, Cron, public route or coworker configuration was changed.
 
-**Remaining code (blocked on decision A below):** the SQL layer is synthetic-only by design (`is_synthetic` checks, the fixed fixture-text catalogue, fixture account/extension IDs), and the live Durable Object poller has no content sink. Real-message processing needs a production schema/migration without those fixture checks, in a separate approved database (never the dev project). It also needs a production repository with its own credentials and a live processor wired into `RingCentralMonitor.poll()` that uses `exchangeSmsJwt` plus `RingCentralSmsSender` in `live` mode. The workflow logic, gates and sender are reusable as-is. Do not relabel real messages as synthetic.
+**How the production path works** (all locked off):
+- **Database:** the same migrations serve a SEPARATE production Supabase project. Migration `0500` adds a deployment profile. Development (the default) accepts only fixtures; production accepts only real rows with FIGA's configured RingCentral account, extension and number. `supabase/production/configure.sql` switches a fresh, empty project once and can never be reversed. The development project must never be switched.
+- **Worker:** every minute the scheduled job runs one Telegram pass (staff commands via getUpdates, then queued alerts; no public webhook) and, every 2 minutes, one RingCentral poll. When `productionReadiness()` reports nothing missing for processing, texts flow into `SmsWorkflow` with the `production` policy (`src/production/runtime.ts`).
+- **Gemma** runs on real texts only with `AI_PRODUCTION_DATA_APPROVED=true`; otherwise the rule-based engine answers. Sensitive texts never go to Gemma and are flagged for staff.
+- **SMS text:** test-only wording is rewritten for customers. The first reply says it is FIGA's automated assistant and ends with "Reply STOP to opt out."
+- **Staff alerts:** besides new requests, urgent requests, status changes, hand replies and texts received while the bot is off, staff now get a "Needs staff review" alert when a conversation newly needs a person (migration `0600`).
+- `npm run preflight` prints which code locks, switches and Cloudflare secrets are still off or missing (names only).
 
 ## Exact go-live checklist
 
 **A. Privacy and contracts (FIGA decision, blocks all real-content processing)**
 1. Decide whether SMS content is covered PHI. If it is: Cloudflare BAA requires an Enterprise plan (Free/Paid do not include one). Workers AI (Gemma) processes message text, so it falls under the same arrangement. A production Supabase project needs Supabase's HIPAA add-on and BAA.
 2. Approve retention for message content and intake fields.
-3. Telegram is not a BAA-covered service. Staff summaries today contain only type, status, city/state, position, count, date, shift, an availability flag and urgency (no names, phone numbers or message text). Confirm that is acceptable, or reduce it further.
+3. Telegram is not a BAA-covered service. Staff summaries contain only type, status, city/state, position, count, date, shift, an availability flag and urgency (no names, phone numbers or message text). Confirm that is acceptable, or reduce it further.
 4. **Rotate the Telegram bot token** (possibly exposed in an earlier screenshot) before any production use.
-5. Apply the pending migrations to the approved database, grant `bot_mode` only to the staff who should switch the bot, and switch to Away from Telegram only when ready.
 
 **B. RingCentral (no changes made; each needs your approval)**
 1. Keep `FIGA Chatbot Read-Only` (ReadMessages) unchanged for polling.
 2. Create a separate app, e.g. "FIGA Chatbot SMS", with JWT auth and exactly **SMS + ReadMessages** permissions. `exchangeSmsJwt` rejects any other scope set.
 3. Authorize that app's JWT as the extension 101 user (owner `3322425015`).
-4. Choose the sending number. It must be SMS-enabled with the **SmsSender** feature on extension 101, and registered: a TCR/10DLC campaign for a local long code, or toll-free verification for a toll-free number. RingCentral blocks unregistered A2P traffic.
-5. Extension 102 stays out of scope until separately authorized.
+4. Choose the sending number. It must be SMS-enabled with the **SmsSender** feature on extension 101, and registered: a TCR/10DLC campaign for a local long code, or toll-free verification for a toll-free number. RingCentral blocks unregistered A2P traffic. Start this early; approval can take days to weeks.
+5. Note the numeric RingCentral account ID (it appears in message-store URIs).
+6. Extension 102 stays out of scope until separately authorized.
 
-**C. Cloudflare**
+**C. Production database**
+1. Create a separate Supabase project (with BAA if decision A requires it). Apply every file in `supabase/migrations/` in order.
+2. Run `supabase/production/configure.sql` with the account ID and sender number, before any conversation exists.
+3. Add verified staff to `staff_roster`; grant `bot_mode` only to people who should switch the bot.
+
+**D. Cloudflare** (everything is prepared in `wrangler.jsonc` `env.production`; deploy with `--env production`)
 1. Upgrade to Workers Paid (recommended). Free allows 10 ms CPU per invocation (including Cron), 100,000 requests/day, 5 Cron Triggers, and 10,000 Workers AI neurons/day. Gemma 4 26B costs 9,091 neurons per million input tokens and 27,273 per million output tokens, so roughly 19 neurons per turn (assuming about 1,500 input and 200 output tokens). That gives about 500 turns/day, which 200 contacts with several turns each can exceed.
-2. Encrypted secrets (never vars): `RINGCENTRAL_CLIENT_ID`, `RINGCENTRAL_CLIENT_SECRET`, `RINGCENTRAL_JWT` (read app), plus the SMS-app equivalents, production Supabase URL/key, `RINGCENTRAL_POLLING_APPROVAL_JSON`, and the rotated Telegram token.
-3. Add the AI binding and `"triggers": { "crons": ["*/2 * * * *"] }` (matches `RINGCENTRAL_POLL_INTERVAL_SECONDS=120`) to `wrangler.jsonc`.
-4. Vars: `RINGCENTRAL_POLLING_ENABLED=true`, `RINGCENTRAL_POLLING_PAUSED=false`, `RINGCENTRAL_MONITORING_SECURITY_APPROVED=true`, plus a sending-enabled and privacy-approved flag for the live sender.
-5. Emergency stop: set `AI_GLOBAL_PAUSED=true` or `RINGCENTRAL_POLLING_PAUSED=true` in the dashboard. Both are checked before every poll, every inference and immediately before every SMS POST.
+2. Secrets via `npx wrangler secret put <NAME> --env production` (never vars): `RINGCENTRAL_CLIENT_ID`, `RINGCENTRAL_CLIENT_SECRET`, `RINGCENTRAL_JWT` (read-only app), `RINGCENTRAL_POLLING_APPROVAL_JSON`, `RINGCENTRAL_SMS_CLIENT_ID`, `RINGCENTRAL_SMS_CLIENT_SECRET`, `RINGCENTRAL_SMS_JWT` (SMS app), `SUPABASE_PRODUCTION_SECRET_KEY`, and the rotated `TELEGRAM_BOT_TOKEN`.
+3. Vars in `env.production`: `RINGCENTRAL_ACCOUNT_ID`, `RINGCENTRAL_SMS_FROM_NUMBER`, `SUPABASE_PRODUCTION_PROJECT_REF`, `SUPABASE_PRODUCTION_URL`, then the switches for each stage below.
+4. Emergency stop: set `AI_GLOBAL_PAUSED=true` or `RINGCENTRAL_POLLING_PAUSED=true` in the dashboard, or `/pause` in Telegram. All are checked before every poll, every inference and immediately before every SMS POST.
 
-**D. Staged activation (each stage separately authorized)**
-1. Reviewed commit flipping `RINGCENTRAL_POLLING_LIVE_ENABLED`. Run read-only polling with no AI and no sending, and confirm the baseline/checkpoints.
-2. Enable inference with sending disabled. Replies are generated and stored (`generated`) but not sent, and staff review them.
-3. Reviewed commit flipping `RINGCENTRAL_SMS_DELIVERY_ENABLED`. Send one outbound SMS to an explicitly approved staff number.
-4. Explicit go-live authorization for customer replies.
+**E. Staged activation** (each stage separately authorized; run `npm run preflight` before each)
+1. **Staff controls only:** `TELEGRAM_STAFF_ENABLED`, `TELEGRAM_LIVE_ENABLED`, `TELEGRAM_POLLING_ENABLED`, `SUPABASE_PRODUCTION_ENABLED` = true. Check `/status` in Telegram; the bot stays Paused.
+2. **Read and draft, no sending:** a reviewed commit flips `RINGCENTRAL_POLLING_LIVE_ENABLED` and `RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED`. Set `FIGA_PRIVACY_APPROVED`, `RINGCENTRAL_MONITORING_SECURITY_APPROVED`, `RINGCENTRAL_POLLING_ENABLED` = true and `RINGCENTRAL_POLLING_PAUSED`, `AI_GLOBAL_PAUSED` = false. Optionally `AI_ENABLED` and `AI_PRODUCTION_DATA_APPROVED` = true. Replies are generated and stored but not sent; staff review them.
+3. **One test send:** a reviewed commit flips `RINGCENTRAL_SMS_DELIVERY_ENABLED`; set `RINGCENTRAL_SMS_SENDING_ENABLED=true` and send one reply to an explicitly approved staff phone.
+4. **Go live:** after explicit authorization, `/auto` or `/away` in Telegram.
 
-Tests: `database-tests/ringcentral-sms-workflow.test.mjs` (13 cases: polling → Gemma → intake → guarded SMS POST, provider/caregiver, replay, STOP/START, staff states, takeover during inference, STOP during auth, pause/resume, uncertain-send terminality, concurrent claims, Telegram Take Over/Return to AI, Gemma outage) and `test/ringcentral-sms-sender.spec.ts` (strict grants, timeouts, endpoint pinning, rechecks, disabled live mode, offline isolation, SMS text rules). These are synthetic/mock results, not live model or carrier deliveries.
+Tests: `database-tests/production-profile.test.mjs` (deployment profile guard; production workflow with fictional production-shaped data), `test/production-runtime.spec.ts` (every production lock and readiness item), `database-tests/ringcentral-sms-workflow.test.mjs` (16 cases: polling → Gemma → intake → guarded SMS POST, provider/caregiver, replay, STOP/START, staff states, takeover during inference, STOP during auth, pause/resume, uncertain-send terminality, concurrent claims, Telegram Take Over/Return to AI, Gemma outage, bot mode, hand replies, office hours) and `test/ringcentral-sms-sender.spec.ts` (strict grants, timeouts, endpoint pinning, rechecks, disabled live mode, offline isolation, SMS text rules). These are synthetic/mock results, not live model or carrier deliveries.
 
 Official requirements: [RingCentral SMS sending](https://developers.ringcentral.com/guide/messaging/sms/sending-sms), [application permissions](https://developers.ringcentral.com/guide/basics/permissions), [SMS enablement](https://developers.ringcentral.com/guide/messaging/sms/sms-requirements), [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/).

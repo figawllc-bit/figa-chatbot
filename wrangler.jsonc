@@ -23,6 +23,47 @@
 		"workers-ai": {
 			"triggers": { "crons": [] },
 			"ai": { "binding": "AI", "remote": true }
+		},
+		// PRODUCTION (prepared, not deployed). Deploys as the existing "figa-chatbot" Worker so the
+		// Durable Object state carries over. Every switch below starts OFF/PAUSED; no public route.
+		// Go-live order and approvals: docs/SMS_WORKFLOW.md. Secrets (never vars): wrangler secret put --env production.
+		// Reviewed code locks must also be flipped: RINGCENTRAL_POLLING_LIVE_ENABLED, RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED
+		// (src/ringcentral/polling.ts) and RINGCENTRAL_SMS_DELIVERY_ENABLED (src/ringcentral/sms-sender.ts).
+		"production": {
+			"name": "figa-chatbot",
+			"workers_dev": false,
+			"preview_urls": false,
+			// Every minute: staff Telegram commands within ~1 minute; RingCentral polling self-limits to 120s.
+			"triggers": { "crons": ["* * * * *"] },
+			"durable_objects": { "bindings": [{ "name": "RINGCENTRAL_MONITOR", "class_name": "RingCentralMonitor" }] },
+			"ai": { "binding": "AI" },
+			// Staged go-live adds secrets step by step; productionReadiness() names any that are missing.
+			"secrets": { "required": [] },
+			"vars": {
+				"FIGA_PRIVACY_APPROVED": "false",
+				"RINGCENTRAL_MONITORING_SECURITY_APPROVED": "false",
+				"RINGCENTRAL_POLLING_ENABLED": "false",
+				"RINGCENTRAL_POLLING_PAUSED": "true",
+				"RINGCENTRAL_POLL_INTERVAL_SECONDS": "120",
+				"RINGCENTRAL_ACCOUNT_ID": "",
+				"RINGCENTRAL_SMS_FROM_NUMBER": "",
+				"RINGCENTRAL_SMS_SENDING_ENABLED": "false",
+				"RINGCENTRAL_OFFLINE_ENABLED": "false",
+				"AI_GLOBAL_PAUSED": "true",
+				"AI_ENABLED": "false",
+				"AI_PROVIDER": "workers-ai",
+				"AI_ALLOW_SYNTHETIC_REQUESTS": "false",
+				"AI_PRODUCTION_DATA_APPROVED": "false",
+				"AI_TIMEOUT_MS": "8000",
+				"SUPABASE_ENABLED": "false",
+				"SUPABASE_PRODUCTION_ENABLED": "false",
+				"SUPABASE_PRODUCTION_PROJECT_REF": "",
+				"SUPABASE_PRODUCTION_URL": "",
+				"TELEGRAM_STAFF_ENABLED": "false",
+				"TELEGRAM_LIVE_ENABLED": "false",
+				"TELEGRAM_POLLING_ENABLED": "false",
+				"TELEGRAM_WEBHOOK_ENABLED": "false"
+			}
 		}
 	},
 	"observability": {

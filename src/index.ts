@@ -17,7 +17,7 @@ import type { OfflineRingCentralReceiver } from './ringcentral/receiver';
 import type { RingCentralEnvironment } from './ringcentral/policy';
 import { RingCentralEventError } from './ringcentral/events';
 import { type RingCentralIncomingPoller } from './ringcentral/polling';
-import { scheduledMonitoring, type MonitoringEnvironment } from './ringcentral/polling-runtime';
+import { scheduledMonitoring, scheduledStaff, type MonitoringEnvironment } from './ringcentral/polling-runtime';
 const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers });
 async function readJSON(request: Request, limit = 32768): Promise<unknown> {
@@ -39,7 +39,12 @@ async function readJSON(request: Request, limit = 32768): Promise<unknown> {
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 export function createWorker(repositoryOverride?: ConversationRepository, ringCentralOffline?: OfflineRingCentralReceiver, ringCentralPoller?: Pick<RingCentralIncomingPoller, 'poll'>) { return {
-  async scheduled(_controller, env: AIEnvironment & DatabaseEnvironment & TelegramEnvironment & RingCentralEnvironment & MonitoringEnvironment) { await scheduledMonitoring(env, ringCentralPoller); },
+  async scheduled(_controller, env: AIEnvironment & DatabaseEnvironment & TelegramEnvironment & RingCentralEnvironment & MonitoringEnvironment & { TELEGRAM_POLLING_ENABLED?: string }) {
+    // Independent passes: a RingCentral failure never blocks staff commands such as /pause, and vice versa.
+    const results = await Promise.allSettled([scheduledStaff(env), scheduledMonitoring(env, ringCentralPoller)]);
+    const failed = results.find(r => r.status === 'rejected');
+    if (failed) throw (failed as PromiseRejectedResult).reason;
+  },
   async fetch(request, env: AIEnvironment & DatabaseEnvironment & TelegramEnvironment & RingCentralEnvironment): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;

@@ -5,9 +5,11 @@ import { ReadOnlyTestError, READ_DEADLINE_MS } from './read-only-test';
 import { numericRingCentralId } from './discovery-approval';
 import type { OfflineRingCentralReceiver } from './receiver';
 import { assertFixtureScope, assertFixtureMessages } from './fixture-policy';
-import { adaptRingCentral, type RingCentralScope } from './events';
+import { adaptRingCentral, type AdaptedEvent, type RingCentralScope, type SmsObservation } from './events';
 
 export const RINGCENTRAL_POLLING_LIVE_ENABLED = false;
+/** Reviewed code change required before real customer texts are processed (re-exported by production/runtime). */
+export const RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED = false;
 export const POLLING_OWNER_ID = '3322425015';
 const HOST = 'https://platform.ringcentral.com';
 const PAGE_SIZE = 20, MAX_PAGES = 3, OVERLAP_MS = 120000, SETTLE_MS = 10000, MAX_WINDOW_MS = 604800000;
@@ -29,12 +31,15 @@ export interface PollReport {
   newMessages: number; duplicates: number; excluded: number; errors: number;
   lastSuccessfulCheck: string | null; errorCategory?: string; httpStatus?: number; oauthErrorCode?: string;
 }
+export interface SmsProcessor { process(message: SmsObservation): Promise<void>; drain?(): Promise<void>;
+  /** When present, outgoing texts are polled too, so replies staff send by hand stop the bot on that thread. */
+  observeOutbound?(message: SmsObservation): Promise<void> }
 type Options = {
   mode: 'offline' | 'live'; store: PollingStateStore; credentials: RuntimeCredentialProvider; http: HttpsExecutor;
   controls: () => PollControls; approval?: PollingApproval;
-  fixture?: { scope: RingCentralScope; receiver?: OfflineRingCentralReceiver; processor?: { process(message: import('./events').SmsObservation): Promise<void>; drain?(): Promise<void>;
-    /** When present, outgoing texts are polled too, so replies staff send by hand stop the bot on that thread. */
-    observeOutbound?(message: import('./events').SmsObservation): Promise<void> } };
+  fixture?: { scope: RingCentralScope; receiver?: OfflineRingCentralReceiver; processor?: SmsProcessor };
+  /** Live production processing. Refused unless RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED. */
+  live?: { scope: RingCentralScope; sink: SmsProcessor };
 };
 const iso = (n: number) => new Date(n).toISOString();
 const timestamp = (v: unknown): v is string => typeof v === 'string' && Number.isFinite(Date.parse(v)) && iso(Date.parse(v)) === v;
@@ -67,7 +72,9 @@ export class RingCentralIncomingPoller {
       if (!a || a.operation !== 'receive_only_polling' || a.host !== HOST || a.ownerId !== POLLING_OWNER_ID ||
         a.productionMetadataStoreApproved !== true || JSON.stringify(a.permissions) !== '["ReadMessages"]' || !timestamp(a.expiresAt) || Date.parse(a.expiresAt) <= Date.now()) fail('approval_invalid');
       if (this.o.fixture) fail('disabled');
+      if (this.o.live && !RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED) fail('disabled');
     } else {
+      if (this.o.live) fail('disabled');
       if (!this.o.fixture || !isOfflineExecutor(this.o.http) || !isOfflineCredentialProvider(this.o.credentials)) fail('disabled');
       assertFixtureScope(this.o.fixture.scope);
       if (this.o.fixture.scope.extensionId !== '200001') fail('owner_mismatch');
@@ -168,9 +175,10 @@ export class RingCentralIncomingPoller {
           if (blockAuth || backoff) { state.authBlocked = blockAuth; state.notBefore = backoff; await save(state); }
           throw error;
         }
-        if (this.o.mode === 'offline') await this.o.fixture?.processor?.drain?.();
+        const processor = this.o.mode === 'offline' ? this.o.fixture?.processor : this.o.live?.sink;
+        await processor?.drain?.();
         const seen = new Set(state.seen.map(x => x.hash));
-        const outbound = this.o.mode === 'offline' && typeof this.o.fixture?.processor?.observeOutbound === 'function';
+        const outbound = typeof processor?.observeOutbound === 'function';
         for (let page = 1; page <= MAX_PAGES; page++) {
           const query = new URLSearchParams({ messageType: 'SMS', ...(outbound ? {} : { direction: 'Inbound' }), perPage: String(PAGE_SIZE), page: String(page), dateFrom: iso(from), dateTo: iso(to) });
           const account = this.o.mode === 'offline' ? '100001' : '~';
@@ -203,16 +211,20 @@ export class RingCentralIncomingPoller {
               if (!match || match[2] !== this.#owner() || match[3] !== id || account !== '~' && match[1] !== account) fail('owner_mismatch');
             }
             if (r.ownerId !== undefined && String(r.ownerId) !== this.#owner()) fail('owner_mismatch');
-            const scope = this.o.fixture?.scope;
+            const scope = this.o.fixture?.scope ?? this.o.live?.scope;
             // Instant events carry inbound texts only; outgoing texts use the message-store form.
             const fixtureEvent = !scope ? undefined : direction === 'Inbound'
               ? { uuid: 'poll-' + id, subscriptionId: scope.subscriptionId, ownerId: scope.extensionId, timestamp: iso(now), event: `/restapi/v1.0/account/${scope.accountId}/extension/${scope.extensionId}/message-store/instant?type=SMS&direction=Inbound`, body: raw }
               : { uuid: 'poll-' + id, subscriptionId: scope.subscriptionId, ownerId: scope.extensionId, timestamp: iso(now), event: `/restapi/v1.0/account/${scope.accountId}/extension/${scope.extensionId}/message-store?type=SMS`, body: { accountId: scope.accountId, extensionId: scope.extensionId, lastUpdated: iso(now), changes: [{ type: 'SMS', newCount: 1, updatedCount: 0 }] } };
             const storeRecords = direction === 'Outbound' ? [raw] : undefined;
-            if (this.o.mode === 'offline') {
-              const adapted = adaptRingCentral(fixtureEvent, scope!, storeRecords);
-              if (adapted.kind !== 'messages') fail('record_invalid');
-              assertFixtureMessages(adapted.messages);
+            let message: SmsObservation | undefined;
+            if (scope) {
+              let adapted: AdaptedEvent | undefined;
+              // Offline fixtures must be exact. A live text the bot cannot use (another number on the
+              // extension, an unexpected shape) is skipped once, never retried forever.
+              try { adapted = adaptRingCentral(fixtureEvent, scope, storeRecords); } catch (error) { if (this.o.mode === 'offline') throw error; }
+              if (this.o.mode === 'offline') { if (adapted?.kind !== 'messages') fail('record_invalid'); assertFixtureMessages(adapted.messages); }
+              if (adapted?.kind === 'messages') message = adapted.messages[0];
             }
             const hash = await hashId(this.#owner(), id);
             if (seen.has(hash)) { report.duplicates++; continue; }
@@ -226,14 +238,14 @@ export class RingCentralIncomingPoller {
               if (received.kind !== 'observed' && received.kind !== 'duplicate') fail('intake_incomplete');
               intakeDuplicate = received.kind === 'duplicate';
             }
-            if (this.o.mode === 'offline' && this.o.fixture?.processor) {
-              const adapted = adaptRingCentral(fixtureEvent, scope!, storeRecords);
-              if (adapted.kind !== 'messages') fail('record_invalid');
-              if (direction === 'Outbound') await this.o.fixture.processor.observeOutbound!(adapted.messages[0]);
-              else await this.o.fixture.processor.process(adapted.messages[0]);
+            let skipped = false;
+            if (processor) {
+              if (!message) skipped = true;
+              else if (direction === 'Outbound') await processor.observeOutbound!(message);
+              else await processor.process(message);
             }
             this.#guard(); state.seen.push({ hash, createdAt: iso(created) }); seen.add(hash); await save(state);
-            if (intakeDuplicate) report.duplicates++; else report.newMessages++;
+            if (skipped) report.excluded++; else if (intakeDuplicate) report.duplicates++; else report.newMessages++;
           }
           const more = typeof paging?.totalPages === 'number' ? paging.totalPages > page : result.records.length === PAGE_SIZE;
           if (more) { if (page === MAX_PAGES) { report.status = 'backlog'; return report; } continue; }

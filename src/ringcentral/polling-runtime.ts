@@ -25,6 +25,12 @@ export function monitoringCredentials(env: MonitoringEnvironment): RuntimeCreden
   };
 }
 
+/** Telegram staff pass from the scheduled job; inert unless TELEGRAM_POLLING_ENABLED and the DO binding exist. */
+export async function scheduledStaff(env: MonitoringEnvironment & { TELEGRAM_POLLING_ENABLED?: string }): Promise<void> {
+  // Check the switch before touching any binding.
+  if (env.TELEGRAM_POLLING_ENABLED !== 'true' || !env.RINGCENTRAL_MONITOR) return;
+  await env.RINGCENTRAL_MONITOR.get(env.RINGCENTRAL_MONITOR.idFromName(KEY)).staff();
+}
 export async function scheduledMonitoring(env: MonitoringEnvironment, override?: Pick<RingCentralIncomingPoller, 'poll'>): Promise<void> {
   // No public HTTP route, no alarms, no Cron registration, no retry wrapper.
   await scheduledPolling(env, override ?? { poll: async () => {

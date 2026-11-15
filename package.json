@@ -15,6 +15,7 @@
     "telegram:notification:test": "node scripts/telegram-notification-test.mjs",
     "telegram:poll": "node scripts/telegram-poll.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
+    "preflight": "node scripts/production-preflight.mjs",
     "cf-typegen": "wrangler types"
   },
   "devDependencies": {
