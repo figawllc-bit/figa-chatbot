@@ -97,7 +97,13 @@ function cachedSmsGrant(env: ProductionEnvironment, http: typeof fetch): () => P
 }
 
 /** The live workflow, or null while anything required for processing is missing. Sending has its own gates in the sender. */
-export function productionWorkflow(env: ProductionEnvironment, http: typeof fetch = request => fetch(request)): SmsWorkflow | null {
+/**
+ * fetch with BOTH arguments forwarded. Database and Telegram clients call transport(url, init);
+ * a one-argument wrapper would silently drop the method, headers (API key) and body.
+ */
+export const workerFetch: typeof fetch = (input, init) => fetch(input, init);
+
+export function productionWorkflow(env: ProductionEnvironment, http: typeof fetch = workerFetch): SmsWorkflow | null {
   if (productionReadiness(env).processing.length) return null;
   const controls = () => ({ paused: pollingControls(env).paused, sendingEnabled: env.RINGCENTRAL_SMS_SENDING_ENABLED === 'true' });
   const sender = new RingCentralSmsSender({ mode: 'live', grant: cachedSmsGrant(env, http), http, sender: env.RINGCENTRAL_SMS_FROM_NUMBER!,
@@ -108,7 +114,7 @@ export function productionWorkflow(env: ProductionEnvironment, http: typeof fetc
 }
 
 /** Staff bot on the production database with the real Telegram API, or null while not ready. */
-export function productionStaffBot(env: ProductionEnvironment, http: typeof fetch = request => fetch(request)) {
+export function productionStaffBot(env: ProductionEnvironment, http: typeof fetch = workerFetch) {
   if (productionReadiness(env).telegram.length) return null;
   const transport = new BotAPITransport(env, http);
   return { bot: new StaffBot(new SupabaseStaffRepository(env, http, productionDatabaseConfiguration), transport), transport };

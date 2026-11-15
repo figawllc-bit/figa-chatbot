@@ -3,7 +3,8 @@ export type DatabaseConfigurator<E> = (env: E) => { configured: boolean; url?: s
 import type { BeginTurn, ConversationRepository, ConversationSnapshot, DatabaseEnvironment, FinishTurn, TurnInput } from './types';
 import type { ChatResponse } from '../types';
 
-export class DatabaseError extends Error { constructor() { super('Database operation unavailable.'); } }
+/** httpStatus is a number only (never a response body), for operator diagnostics. */
+export class DatabaseError extends Error { constructor(readonly httpStatus: number | null = null, readonly code: string | null = null) { super('Database operation unavailable.'); } }
 export class SupabaseRepository<E extends object = DatabaseEnvironment> implements ConversationRepository {
   constructor(private readonly env: E, private readonly transport: typeof fetch = fetch,
     private readonly configure: DatabaseConfigurator<E> = databaseConfiguration as unknown as DatabaseConfigurator<E>) {}
@@ -19,7 +20,12 @@ export class SupabaseRepository<E extends object = DatabaseEnvironment> implemen
         headers: { apikey: config.key, 'Content-Type': 'application/json' },
         body: JSON.stringify(parameters),
       });
-      if (!response.ok) { await response.body?.cancel(); throw new DatabaseError(); }
+      if (!response.ok) {
+        // Keep only PostgREST's short error code (e.g. 42501, PGRST202), never the message/body.
+        let code: string | null = null;
+        try { const v = JSON.parse((await response.text()).slice(0, 4096)); if (typeof v?.code === 'string' && /^[A-Z0-9]{3,10}$/.test(v.code)) code = v.code; } catch { /* no code */ }
+        throw new DatabaseError(response.status, code);
+      }
       const reader = response.body?.getReader();
       if (!reader) throw new DatabaseError();
       const chunks: Uint8Array[] = [];
@@ -35,7 +41,7 @@ export class SupabaseRepository<E extends object = DatabaseEnvironment> implemen
       let offset = 0;
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length; }
       return JSON.parse(new TextDecoder().decode(bytes)) as T;
-    } catch { throw new DatabaseError(); } // No provider bodies, credentials, or message logs.
+    } catch (error) { throw error instanceof DatabaseError ? error : new DatabaseError(); } // No provider bodies, credentials, or message logs.
   }
   create(tokenHash: string) { return this.rpc<ConversationSnapshot>('figa_create_conversation', { p_token_hash: tokenHash }); }
   restore(id: string, tokenHash: string) { return this.rpc<ConversationSnapshot | null>('figa_restore_conversation', { p_id: id, p_token_hash: tokenHash }); }

@@ -4,6 +4,9 @@ import { RingCentralIncomingPoller, POLLING_OWNER_ID, RINGCENTRAL_POLLING_LIVE_E
 import { monitoringCredentials } from './polling-runtime';
 import { productionScope, productionStaffBot, productionWorkflow, type ProductionEnvironment } from '../production/runtime';
 import { TelegramPoller } from '../telegram/ingress';
+import { TelegramTransportError } from '../telegram/transport';
+import { DatabaseError } from '../database/supabase';
+import { productionDatabaseConfiguration } from '../database/config';
 
 const KEY = 'ringcentral-incoming:' + POLLING_OWNER_ID;
 // Only used INSIDE the singleton DO. Never split lock acquisition and saves
@@ -34,7 +37,7 @@ export class DurablePollingStore implements PollingStateStore {
   }
 }
 
-export interface StaffPollReport { status: 'disabled' | 'ok' | 'error'; processed: number }
+export interface StaffPollReport { status: 'disabled' | 'ok' | 'error'; processed: number; failure?: 'telegram' | 'database' | 'other'; httpStatus?: number | null; code?: string | null; keyCheck?: number | null }
 export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
   private poller?: RingCentralIncomingPoller;
   async poll(): Promise<PollReport> {
@@ -62,7 +65,19 @@ export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
         const next = await new TelegramPoller(staff.transport, staff.bot).once(offset);
         if (next !== offset) await this.ctx.storage.put('telegram-offset', next);
         return { status: 'ok' as const, processed: next - offset };
-      } catch { return { status: 'error' as const, processed: 0 }; } // No Telegram bodies or tokens in logs.
+      } catch (error) {
+        // Category only. No Telegram bodies, tokens or database responses in logs.
+        const failure = error instanceof TelegramTransportError ? 'telegram' as const : error instanceof DatabaseError ? 'database' as const : 'other' as const;
+        const httpStatus = error instanceof DatabaseError ? error.httpStatus : null;
+        // On 401, ask the project's API root whether it accepts this key at all (status number only):
+        // 200 = key valid (the database refused the bot's functions); 401 = key not valid for this project.
+        let keyCheck: number | null = null;
+        if (httpStatus === 401) {
+          const db = productionDatabaseConfiguration(this.env);
+          try { const r = await fetch(`${db.url}/rest/v1/`, { headers: { apikey: db.key! }, redirect: 'manual', signal: AbortSignal.timeout(5000) }); keyCheck = r.status; await r.body?.cancel(); } catch { keyCheck = null; }
+        }
+        return { status: 'error' as const, processed: 0, failure, httpStatus, code: error instanceof DatabaseError ? error.code : null, keyCheck };
+      }
     });
   }
 }

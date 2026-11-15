@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:workers';
 import { describe, it, expect, vi } from 'vitest';
-import { productionReadiness, productionStaffBot, productionWorkflow, productionScope, RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED, type ProductionEnvironment } from '../src/production/runtime';
+import { productionReadiness, productionStaffBot, productionWorkflow, productionScope, workerFetch, RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED, type ProductionEnvironment } from '../src/production/runtime';
 import { RingCentralIncomingPoller, POLLING_OWNER_ID, RINGCENTRAL_POLLING_LIVE_ENABLED } from '../src/ringcentral/polling';
 import { RINGCENTRAL_SMS_DELIVERY_ENABLED } from '../src/ringcentral/sms-sender';
 import { createOfflineCredentials } from '../src/ringcentral/offline-credentials';
@@ -72,5 +72,18 @@ describe('production wiring stays locked until reviewed code changes and approva
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     await createWorker().scheduled({} as ScheduledController, { ...env, TELEGRAM_POLLING_ENABLED: 'true', RINGCENTRAL_POLLING_ENABLED: 'true' } as never);
     expect(fetchSpy).not.toHaveBeenCalled(); fetchSpy.mockRestore();
+  });
+});
+
+describe('production transport', () => {
+  it('forwards the method, API key header and body to fetch (regression: a one-argument wrapper dropped them)', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    try {
+      const { productionSmsRepository } = await import('../src/ringcentral/sms-workflow');
+      await productionSmsRepository(full, workerFetch).pending();
+      const [url, init] = spy.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://figaprod01.supabase.co/rest/v1/rpc/figa_rc_sms_pending');
+      expect(init.method).toBe('POST'); expect((init.headers as Record<string, string>).apikey).toBe('sb_secret_inert_test_fixture'); expect(init.body).toBe('{}');
+    } finally { spy.mockRestore(); }
   });
 });
