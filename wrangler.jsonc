@@ -56,12 +56,14 @@
 				"AI_PRODUCTION_DATA_APPROVED": "false",
 				"AI_TIMEOUT_MS": "8000",
 				"SUPABASE_ENABLED": "false",
-				"SUPABASE_PRODUCTION_ENABLED": "false",
-				"SUPABASE_PRODUCTION_PROJECT_REF": "",
-				"SUPABASE_PRODUCTION_URL": "",
-				"TELEGRAM_STAFF_ENABLED": "false",
-				"TELEGRAM_LIVE_ENABLED": "false",
-				"TELEGRAM_POLLING_ENABLED": "false",
+				// Stage 1: separate production project (never the development project).
+				"SUPABASE_PRODUCTION_ENABLED": "true",
+				"SUPABASE_PRODUCTION_PROJECT_REF": "aahxrxfwmtoswxjnlbal",
+				"SUPABASE_PRODUCTION_URL": "https://aahxrxfwmtoswxjnlbal.supabase.co",
+				// Stage 1: staff controls via Telegram polling (inert until the token secret exists).
+				"TELEGRAM_STAFF_ENABLED": "true",
+				"TELEGRAM_LIVE_ENABLED": "true",
+				"TELEGRAM_POLLING_ENABLED": "true",
 				"TELEGRAM_WEBHOOK_ENABLED": "false"
 			}
 		}
