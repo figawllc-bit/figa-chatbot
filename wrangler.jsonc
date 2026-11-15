@@ -5,8 +5,26 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"name": "figa-chatbot",
-	"main": "src/index.ts",
+	"main": "src/worker.ts",
 	"compatibility_date": "2026-11-10",
+	// Prepared only: no Cron triggers and the source live gate remains false.
+	"durable_objects": { "bindings": [{ "name": "RINGCENTRAL_MONITOR", "class_name": "RingCentralMonitor" }] },
+	"migrations": [{ "tag": "v1-ringcentral-monitor", "new_sqlite_classes": ["RingCentralMonitor"] }],
+	"triggers": { "crons": [] },
+	"secrets": { "required": ["RINGCENTRAL_CLIENT_ID", "RINGCENTRAL_CLIENT_SECRET", "RINGCENTRAL_JWT"] },
+	"vars": {
+		"RINGCENTRAL_POLLING_ENABLED": "false",
+		"RINGCENTRAL_POLLING_PAUSED": "true",
+		"RINGCENTRAL_POLL_INTERVAL_SECONDS": "120",
+		"RINGCENTRAL_MONITORING_SECURITY_APPROVED": "false"
+	},
+	// No remote bindings in the default environment. Opt in with: npm run dev:ai
+	"env": {
+		"workers-ai": {
+			"triggers": { "crons": [] },
+			"ai": { "binding": "AI", "remote": true }
+		}
+	},
 	"observability": {
 		"enabled": true
 	},

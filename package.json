@@ -5,13 +5,23 @@
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
+    "dev:ai": "wrangler dev --env workers-ai --env-file .dev.vars --ip 127.0.0.1 --port 8787",
     "start": "wrangler dev",
     "test": "vitest",
+    "test:run": "vitest run",
+    "test:database": "node --test database-tests/*.test.mjs",
+    "demo:telegram": "node scripts/telegram-demo.mjs",
+    "telegram:test": "node scripts/telegram-test.mjs",
+    "telegram:notification:test": "node scripts/telegram-notification-test.mjs",
+    "telegram:poll": "node scripts/telegram-poll.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
     "cf-typegen": "wrangler types"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.3",
+    "@electric-sql/pglite": "^0.5.16",
     "@types/node": "^26.6.6",
+    "supabase": "^3.1.0",
     "typescript": "^5.5.2",
     "vitest": "~5.0.3",
     "wrangler": "^4.161.0"

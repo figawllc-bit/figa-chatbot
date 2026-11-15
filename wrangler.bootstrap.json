@@ -1,0 +1,47 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "figa-chatbot",
+  "account_id": "ac4e7fc2c7aa68ef9bda340640296fab",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-10",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [],
+  "triggers": {
+    "crons": []
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RINGCENTRAL_MONITOR",
+        "class_name": "RingCentralMonitor"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-ringcentral-monitor",
+      "new_sqlite_classes": [
+        "RingCentralMonitor"
+      ]
+    }
+  ],
+  "vars": {
+    "RINGCENTRAL_POLLING_ENABLED": "false",
+    "RINGCENTRAL_POLLING_PAUSED": "true",
+    "RINGCENTRAL_POLL_INTERVAL_SECONDS": "120",
+    "RINGCENTRAL_MONITORING_SECURITY_APPROVED": "false",
+    "RINGCENTRAL_OFFLINE_ENABLED": "false",
+    "AI_GLOBAL_PAUSED": "true",
+    "AI_ENABLED": "false",
+    "AI_ALLOW_SYNTHETIC_REQUESTS": "false",
+    "SUPABASE_ENABLED": "false",
+    "TELEGRAM_STAFF_ENABLED": "false",
+    "TELEGRAM_LIVE_ENABLED": "false",
+    "TELEGRAM_WEBHOOK_ENABLED": "false"
+  },
+  "observability": {
+    "enabled": false
+  },
+  "upload_source_maps": false
+}

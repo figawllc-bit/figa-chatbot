@@ -1,0 +1,8 @@
+{
+  "name": "figa-offline-tests",
+  "main": "../../src/worker.ts",
+  "compatibility_date": "2026-11-10",
+  "triggers": { "crons": [] },
+  "durable_objects": { "bindings": [{ "name": "RINGCENTRAL_MONITOR", "class_name": "RingCentralMonitor" }] },
+  "migrations": [{ "tag": "v1-ringcentral-monitor", "new_sqlite_classes": ["RingCentralMonitor"] }]
+}

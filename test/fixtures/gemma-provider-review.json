@@ -1,0 +1,21 @@
+{
+  "source": "Fictional extraction captured in the approved one-provider live test; replay only",
+  "message": "My name is Alex Example. I need three caregivers for a group home in Salem, Oregon, starting tonight on the night shift. This is urgent.",
+  "extraction": {
+    "intent": "provider",
+    "intentEvidence": "I need three caregivers for a group home",
+    "ambiguous": false,
+    "needsHumanReview": true,
+    "faqIndex": -1,
+    "updates": [
+      { "field": "name", "quote": "Alex Example" },
+      { "field": "homeType", "quote": "group home" },
+      { "field": "city", "quote": "Salem" },
+      { "field": "state", "quote": "Oregon" },
+      { "field": "count", "quote": "three" },
+      { "field": "position", "quote": "caregivers" },
+      { "field": "shift", "quote": "night shift" },
+      { "field": "date", "quote": "tonight" }
+    ]
+  }
+}

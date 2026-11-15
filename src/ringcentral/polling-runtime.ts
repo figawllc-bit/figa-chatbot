@@ -1,0 +1,35 @@
+import { POLLING_OWNER_ID, RINGCENTRAL_POLLING_LIVE_ENABLED, pollingControls, scheduledPolling, type RingCentralIncomingPoller, type PollingEnvironment } from './polling';
+import type { RuntimeCredentialProvider } from './oauth-read-session';
+import type { RingCentralMonitor } from './polling-durable';
+
+const KEY = 'ringcentral-incoming:' + POLLING_OWNER_ID;
+export interface MonitoringEnvironment extends PollingEnvironment {
+  RINGCENTRAL_MONITOR?: DurableObjectNamespace<RingCentralMonitor>;
+  // Cloudflare secrets, never vars, files, request input or logs.
+  RINGCENTRAL_CLIENT_ID?: string;
+  RINGCENTRAL_CLIENT_SECRET?: string;
+  RINGCENTRAL_JWT?: string;
+  RINGCENTRAL_POLLING_APPROVAL_JSON?: string;
+  RINGCENTRAL_MONITORING_SECURITY_APPROVED?: string;
+}
+
+export function monitoringCredentials(env: MonitoringEnvironment): RuntimeCredentialProvider {
+  return async () => {
+    // Check BEFORE touching secret bindings; env alone cannot enable live access.
+    if (!RINGCENTRAL_POLLING_LIVE_ENABLED || !pollingControls(env).enabled || pollingControls(env).paused || env.RINGCENTRAL_MONITORING_SECURITY_APPROVED !== 'true')
+      throw new Error('Monitoring disabled.');
+    const clientId = env.RINGCENTRAL_CLIENT_ID, clientSecret = env.RINGCENTRAL_CLIENT_SECRET, jwt = env.RINGCENTRAL_JWT;
+    if (!clientId || !clientSecret || !jwt) throw new Error('Monitoring credentials unavailable.');
+    return { kind: 'jwt', clientId, clientSecret, jwt, host: 'https://platform.ringcentral.com', accountId: '~', extensionId: POLLING_OWNER_ID,
+      appPermissions: ['ReadMessages'] }; // Provider assertion; OAuth scope/owner remain independently checked.
+  };
+}
+
+export async function scheduledMonitoring(env: MonitoringEnvironment, override?: Pick<RingCentralIncomingPoller, 'poll'>): Promise<void> {
+  // No public HTTP route, no alarms, no Cron registration, no retry wrapper.
+  await scheduledPolling(env, override ?? { poll: async () => {
+    if (!env.RINGCENTRAL_MONITOR || env.RINGCENTRAL_MONITORING_SECURITY_APPROVED !== 'true') throw new Error('Monitoring unavailable.');
+    const stub = env.RINGCENTRAL_MONITOR.get(env.RINGCENTRAL_MONITOR.idFromName(KEY));
+    return stub.poll();
+  } });
+}

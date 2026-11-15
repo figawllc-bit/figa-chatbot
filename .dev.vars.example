@@ -1,0 +1,28 @@
+# Default local mode needs no credentials. For optional live synthetic inference,
+# copy to .dev.vars, verify Workers Free plan/quota, enable the flags,
+# then run npm run dev:ai. Authentication alone does not confirm the free plan.
+AI_ENABLED=false
+AI_PROVIDER=workers-ai
+AI_ALLOW_SYNTHETIC_REQUESTS=false
+AI_FREE_TIER_CONFIRMED=false
+# Optional explicitly authorized smoke test: maximum 2 attempts per server isolate.
+# This does not assert the account plan/quota was verified. Restart resets the budget.
+AI_SYNTHETIC_TEST_CALLS=0
+AI_TIMEOUT_MS=8000
+# Optional local control: active, blocked, human_takeover
+CONVERSATION_CONTROL=active
+
+# Phase 3: leave disabled until schema review and isolated development project approval.
+SUPABASE_ENABLED=false
+SUPABASE_ISOLATED_DEV_CONFIRMED=false
+SUPABASE_PROJECT_REF=
+SUPABASE_URL=
+SUPABASE_SECRET_KEY=
+
+# Phase 4 remains disabled until new migration approval and controlled activation.
+# No token is needed for npm run demo:telegram. Never paste real tokens into this template.
+TELEGRAM_STAFF_ENABLED=false
+TELEGRAM_WEBHOOK_ENABLED=false
+TELEGRAM_LIVE_ENABLED=false
+TELEGRAM_WEBHOOK_SECRET=
+TELEGRAM_BOT_TOKEN=
