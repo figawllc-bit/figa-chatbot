@@ -201,6 +201,66 @@ test('SMS detection to persisted Gemma intake and guarded SMS POST, fictional on
    assert.equal(await status(d),'suppressed');assert.equal(pauseDuringSend.http.audit().filter(x=>x.path.endsWith('/sms')).length,0);
    await db.query("update public.figa_bot_mode set mode='away'");
   });
+  await t.test('hand reply: a staff text seen in the same poll stops the bot, alerts staff, and Return to AI hands it back',async()=>{
+   const start=Date.parse('2026-11-16T12:00:00Z');let now=start;Date.now=()=>now;
+   try {
+    const customer='+15035550179',inId=String(310000+(++seq)),staffId=String(310000+(++seq));
+    const inbound=app.message(inId,'Inbound','Fictional staffing inquiry',customer);inbound.creationTime=new Date(start+20000).toISOString();
+    // The staff reply is NEWER than the customer text, yet it is processed first.
+    const byHand=app.message(staffId,'Outbound','Fictional claimed staff reply',customer);byHand.creationTime=byHand.lastModifiedTime=new Date(start+40000).toISOString();
+    const out=sender();const flow=new app.SyntheticSmsWorkflow(repo,engine(),out.s,()=>controls);
+    const steps=[{body:JSON.stringify({access_token:'fictional-issued-access-token',token_type:'Bearer',expires_in:3600,owner_id:'200001',scope:'ReadMessages'})},{body:JSON.stringify({records:[inbound,byHand]})}];
+    let checkpoint=null;const store={async exclusive(k,work){return work(checkpoint,async s=>{checkpoint=structuredClone(s);});}};
+    const http=app.createOfflinePollingHttp(JSON.stringify(steps));
+    const poller=new app.RingCentralIncomingPoller({mode:'offline',store,credentials:app.createOfflineCredentials('jwt',undefined,'production'),http:http.executor,controls:()=>({enabled:true,paused:false}),fixture:{scope:app.scope,processor:flow}});
+    assert.equal((await poller.poll()).status,'baseline');now+=120000;const before=models;
+    assert.equal((await poller.poll()).newMessages,2);
+    const list=http.audit().find(x=>x.path.endsWith('/message-store'));assert.ok(list,'message list requested');
+    assert.equal(models,before);assert.equal(out.http.audit().length,0);assert.equal(await status({id:inId}),'suppressed');
+    const conv=(await db.query('select conversation_id from public.rc_sms_jobs where inbound_id=$1',[inId])).rows[0].conversation_id;
+    assert.equal((await db.query('select review_hold from public.rc_threads where conversation_id=$1',[conv])).rows[0].review_hold,true);
+    assert.equal((await db.query("select actor from public.rc_observations where message_id=$1",[staffId])).rows[0].actor,'unknown');
+    assert.equal(Number((await db.query("select count(*) from public.telegram_notifications where conversation_id=$1 and kind='hand_reply'",[conv])).rows[0].count),1);
+    // Staff hand it back: Take Over, then Return to AI clears the hold.
+    const sid=(await db.query('insert into auth.users(id) values(gen_random_uuid()) returning id')).rows[0].id,actor=7646341000+seq;
+    await db.query("insert into public.staff_roster(staff_user_id,telegram_user_id,telegram_chat_id,active,permissions,verified_at,verified_by) values($1,$2,$2,true,array['view','takeover','return_ai'],now(),$1)",[sid,actor]);
+    const staff=async action=>{const r=(await db.query('select revision from public.conversations where id=$1',[conv])).rows[0].revision;
+     return (await db.query('select public.figa_telegram_process($1,$2,$3,$4,$5,$6,$7) as r',[++seq,actor,actor,action,conv,r,'d'.repeat(64)])).rows[0].r.kind;};
+    assert.equal(await staff('takeover'),'applied');assert.equal(await staff('return_ai'),'applied');
+    assert.equal((await db.query('select review_hold from public.rc_threads where conversation_id=$1',[conv])).rows[0].review_hold,false);
+    const next=observe('Fictional provider inquiry',customer),out2=sender();
+    await new app.SyntheticSmsWorkflow(repo,engine(),out2.s,()=>controls).process(next);assert.equal(await status(next),'accepted');
+    // The bot's own reply, seen later in the message list, is recognised and never places a hold.
+    await flow.observeOutbound(app.adaptRingCentral({uuid:'own-'+seq,subscriptionId:app.scope.subscriptionId,ownerId:'200001',timestamp:new Date(now).toISOString(),event:'/restapi/v1.0/account/100001/extension/200001/message-store?type=SMS',body:{accountId:'100001',extensionId:'200001',lastUpdated:new Date(now).toISOString(),changes:[{type:'SMS',newCount:1,updatedCount:0}]}},app.scope,[app.message(out2.external,'Outbound','Fictional chatbot observation',customer)]).messages[0]);
+    assert.equal((await db.query("select actor from public.rc_observations where message_id=$1",[out2.external])).rows[0].actor,'chatbot');
+    assert.equal((await db.query('select review_hold from public.rc_threads where conversation_id=$1',[conv])).rows[0].review_hold,false);
+   } finally {Date.now=originalNow;}
+  });
+  await t.test('office hours: Auto is On Duty inside hours and Away outside; /sethours works through the Telegram bot',async()=>{
+   class StaffRepo extends app.SupabaseStaffRepository {rpc(name,params){const op=queue.then(async()=>{await db.exec('set role service_role');try{const values=Object.values(params).map(v=>v&&typeof v==='object'?JSON.stringify(v):v);return (await db.query(`select public.${name}(${values.map((_,i)=>'$'+(i+1)).join(',')}) as result`,values)).rows[0].result;}finally{await db.exec('reset role');}});queue=op.catch(()=>{});return op;}}
+   const transport=new app.SimulatedTelegramTransport(),bot=new app.StaffBot(new StaffRepo({}),transport);
+   const addStaff=async permissions=>{const id=(await db.query('insert into auth.users(id) values(gen_random_uuid()) returning id')).rows[0].id,actor=7646342000+(++seq);
+    await db.query('insert into public.staff_roster(staff_user_id,telegram_user_id,telegram_chat_id,active,permissions,verified_at,verified_by) values($1,$2,$2,true,$3,now(),$1)',[id,actor,permissions]);return actor;};
+   const manager=await addStaff(['view','bot_mode']),viewer=await addStaff(['view']);
+   const say=(actor,text)=>bot.handle({update_id:++seq,message:{from:{id:actor,is_bot:false},chat:{id:actor,type:'private'},text}});
+   // Default schedule placeholder: Mon-Fri 08:00-17:00 Pacific.
+   const eff=async at=>(await db.query('select public.figa_bot_effective_mode($1) as m',[at])).rows[0].m;
+   assert.equal(await say(manager,'/auto'),'applied');
+   assert.equal(await eff('2026-11-16T17:30:00Z'),'on_duty');assert.equal(await eff('2026-11-17T02:00:00Z'),'away');assert.equal(await eff('2026-11-15T18:00:00Z'),'away');
+   assert.equal(await say(viewer,'/sethours mon-sun 00:00-24:00'),'denied');
+   // Hours covering the whole week: Auto means On Duty right now, so texts are silenced and alerted.
+   assert.equal(await say(manager,'/sethours mon-sun 00:00-24:00'),'applied');assert.match(transport.messages.at(-1).text,/AUTO - following office hours\. Right now:\nON DUTY/);
+   const m=observe(provider,'+15035550180'),out=sender(),before=models;await new app.SyntheticSmsWorkflow(repo,engine(),out.s,()=>controls).process(m);
+   assert.equal(models,before);assert.equal(out.http.audit().length,0);assert.equal(await status(m),'suppressed');
+   const conv=(await db.query('select conversation_id from public.rc_sms_jobs where inbound_id=$1',[m.id])).rows[0].conversation_id;
+   assert.equal(Number((await db.query("select count(*) from public.telegram_notifications where conversation_id=$1 and kind='message'",[conv])).rows[0].count),1);
+   // No office hours at all: Auto means Away, so the bot answers.
+   assert.equal(await say(manager,'/sethours none'),'applied');assert.match(transport.messages.at(-1).text,/Right now:\nAWAY[\s\S]*Office hours: none set/);
+   const n=observe(provider,'+15035550181'),out2=sender();await new app.SyntheticSmsWorkflow(repo,engine(),out2.s,()=>controls).process(n);assert.equal(await status(n),'accepted');
+   // Pause still overrides everything, including Auto.
+   assert.equal(await say(manager,'/pause'),'applied');assert.equal(await eff('2026-11-16T17:30:00Z'),'paused');
+   await db.query("update public.figa_bot_mode set mode='away'");
+  });
   await t.test('unapproved real-like material and live sender cannot touch credentials or network',async()=>{
    const m=observe();await assert.rejects(new app.SyntheticSmsWorkflow(repo,engine(),sender().s,()=>controls).process({...m,text:'unapproved customer material'}));
    let accessed=0;const live=new app.RingCentralSmsSender({mode:'live',sender:'+15035550100',enabled:()=>true,privacyApproved:()=>true,http:async()=>{accessed++;throw Error();},grant:async()=>{accessed++;throw Error();}});

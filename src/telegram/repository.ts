@@ -12,4 +12,5 @@ export class SupabaseStaffRepository extends SupabaseRepository implements Staff
   notification(actor:number,chat:number,c:NotificationClaim) { return this.rpc<StaffNotification|null>('figa_telegram_notification',{p_actor:actor,p_chat:chat,p_notification:c.id,p_lease:c.leaseToken}); }
   acknowledge(actor:number,chat:number,c:NotificationClaim) { return this.rpc<boolean>('figa_telegram_ack',{p_actor:actor,p_chat:chat,p_notification:c.id,p_lease:c.leaseToken}); }
   mode(u:StaffUpdate, hash:string) { return this.rpc<BotModeResult>('figa_telegram_mode',{p_update_id:u.updateId,p_actor:u.actor,p_chat:u.chat,p_mode:u.mode??null,p_request_hash:hash}); }
+  hours(u:StaffUpdate, hash:string) { return this.rpc<BotModeResult>('figa_telegram_hours',{p_update_id:u.updateId,p_actor:u.actor,p_chat:u.chat,p_hours:u.hours,p_request_hash:hash}); }
 }

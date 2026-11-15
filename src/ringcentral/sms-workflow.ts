@@ -60,11 +60,20 @@ export class SyntheticSmsWorkflow {
     if (this.controls().paused) return;
     for (const message of await this.repo.pending()) await this.process(message);
   }
-  async process(m: SmsObservation): Promise<void> {
-    assertFixtureMessages([m]); if (m.direction !== 'Inbound') throw Error('Inbound SMS required.');
+  /** Records an outgoing text. One the bot did not send (a staff hand reply) puts a hold on the thread. */
+  async observeOutbound(m: SmsObservation): Promise<void> {
+    if (m.direction !== 'Outbound') throw Error('Outbound SMS required.');
+    await this.observe(m);
+  }
+  private async observe(m: SmsObservation): Promise<void> {
+    assertFixtureMessages([m]);
     const hash = await digest(JSON.stringify([m.id,m.accountId,m.extensionId,m.businessNumber,m.customerNumber,m.direction,m.text,m.messageStatus,m.modifiedAt,m.optOut]));
     const observed = await this.repo.observe(`sms-workflow:${m.accountId}:${m.extensionId}:${m.id}`, hash, [m]);
     if (observed.kind === 'conflict') throw Error('Conflicting SMS observation.');
+  }
+  async process(m: SmsObservation): Promise<void> {
+    if (m.direction !== 'Inbound') throw Error('Inbound SMS required.');
+    await this.observe(m);
     const job = await this.repo.prepare(m);
     if (!['new', 'generated'].includes(job.status) || this.controls().paused) return;
     const snapshot = await this.repo.deliverySnapshot(job.conversationId);

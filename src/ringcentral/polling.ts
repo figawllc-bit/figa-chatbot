@@ -32,7 +32,9 @@ export interface PollReport {
 type Options = {
   mode: 'offline' | 'live'; store: PollingStateStore; credentials: RuntimeCredentialProvider; http: HttpsExecutor;
   controls: () => PollControls; approval?: PollingApproval;
-  fixture?: { scope: RingCentralScope; receiver?: OfflineRingCentralReceiver; processor?: { process(message: import('./events').SmsObservation): Promise<void>; drain?(): Promise<void> } };
+  fixture?: { scope: RingCentralScope; receiver?: OfflineRingCentralReceiver; processor?: { process(message: import('./events').SmsObservation): Promise<void>; drain?(): Promise<void>;
+    /** When present, outgoing texts are polled too, so replies staff send by hand stop the bot on that thread. */
+    observeOutbound?(message: import('./events').SmsObservation): Promise<void> } };
 };
 const iso = (n: number) => new Date(n).toISOString();
 const timestamp = (v: unknown): v is string => typeof v === 'string' && Number.isFinite(Date.parse(v)) && iso(Date.parse(v)) === v;
@@ -168,8 +170,9 @@ export class RingCentralIncomingPoller {
         }
         if (this.o.mode === 'offline') await this.o.fixture?.processor?.drain?.();
         const seen = new Set(state.seen.map(x => x.hash));
+        const outbound = this.o.mode === 'offline' && typeof this.o.fixture?.processor?.observeOutbound === 'function';
         for (let page = 1; page <= MAX_PAGES; page++) {
-          const query = new URLSearchParams({ messageType: 'SMS', direction: 'Inbound', perPage: String(PAGE_SIZE), page: String(page), dateFrom: iso(from), dateTo: iso(to) });
+          const query = new URLSearchParams({ messageType: 'SMS', ...(outbound ? {} : { direction: 'Inbound' }), perPage: String(PAGE_SIZE), page: String(page), dateFrom: iso(from), dateTo: iso(to) });
           const account = this.o.mode === 'offline' ? '100001' : '~';
           const url = `${HOST}/restapi/v1.0/account/${account}/extension/${this.#owner()}/message-store?${query}`;
           allowedLists.add(url);
@@ -180,11 +183,16 @@ export class RingCentralIncomingPoller {
           const paging = result.paging as { page?: unknown; perPage?: unknown; totalPages?: unknown } | undefined;
           if (paging !== undefined && (!paging || typeof paging !== 'object' || Array.isArray(paging) || paging.page !== page || paging.perPage !== PAGE_SIZE ||
             paging.totalPages !== undefined && (!Number.isSafeInteger(paging.totalPages) || Number(paging.totalPages) < page && !(paging.totalPages === 0 && page === 1 && result.records.length === 0)))) fail('response_format');
-          for (const raw of result.records) {
+          // Outgoing texts first: if staff replied by hand since the last check, the hold
+          // is in place before the bot considers answering any incoming text on this page.
+          const isOut = (v: unknown) => !!v && typeof v === 'object' && (v as Record<string, unknown>).direction === 'Outbound';
+          const records = outbound ? [...result.records].sort((a, b) => Number(!isOut(a)) - Number(!isOut(b))) : result.records;
+          for (const raw of records) {
             this.#guard();
             if (!raw || typeof raw !== 'object' || Array.isArray(raw)) fail('response_format');
             const r = raw as Record<string, unknown>;
-            if (r.type !== 'SMS' || r.direction !== 'Inbound' || (r.attachments !== undefined && (!Array.isArray(r.attachments) || r.attachments.length > 0))) { report.excluded++; continue; }
+            const direction = r.direction === 'Inbound' || outbound && r.direction === 'Outbound' ? r.direction : undefined;
+            if (r.type !== 'SMS' || !direction || (r.attachments !== undefined && (!Array.isArray(r.attachments) || r.attachments.length > 0))) { report.excluded++; continue; }
             const id = typeof r.id === 'number' && Number.isSafeInteger(r.id) ? String(r.id) : r.id;
             if (!numericRingCentralId(id) || typeof r.creationTime !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?(?:Z|[+-]\d\d:\d\d)$/.test(r.creationTime) || !Number.isFinite(Date.parse(r.creationTime))) fail('record_invalid');
             const created = Date.parse(r.creationTime);
@@ -196,9 +204,13 @@ export class RingCentralIncomingPoller {
             }
             if (r.ownerId !== undefined && String(r.ownerId) !== this.#owner()) fail('owner_mismatch');
             const scope = this.o.fixture?.scope;
-            const fixtureEvent = scope ? { uuid: 'poll-' + id, subscriptionId: scope.subscriptionId, ownerId: scope.extensionId, timestamp: iso(now), event: `/restapi/v1.0/account/${scope.accountId}/extension/${scope.extensionId}/message-store/instant?type=SMS&direction=Inbound`, body: raw } : undefined;
+            // Instant events carry inbound texts only; outgoing texts use the message-store form.
+            const fixtureEvent = !scope ? undefined : direction === 'Inbound'
+              ? { uuid: 'poll-' + id, subscriptionId: scope.subscriptionId, ownerId: scope.extensionId, timestamp: iso(now), event: `/restapi/v1.0/account/${scope.accountId}/extension/${scope.extensionId}/message-store/instant?type=SMS&direction=Inbound`, body: raw }
+              : { uuid: 'poll-' + id, subscriptionId: scope.subscriptionId, ownerId: scope.extensionId, timestamp: iso(now), event: `/restapi/v1.0/account/${scope.accountId}/extension/${scope.extensionId}/message-store?type=SMS`, body: { accountId: scope.accountId, extensionId: scope.extensionId, lastUpdated: iso(now), changes: [{ type: 'SMS', newCount: 1, updatedCount: 0 }] } };
+            const storeRecords = direction === 'Outbound' ? [raw] : undefined;
             if (this.o.mode === 'offline') {
-              const adapted = adaptRingCentral(fixtureEvent, scope!);
+              const adapted = adaptRingCentral(fixtureEvent, scope!, storeRecords);
               if (adapted.kind !== 'messages') fail('record_invalid');
               assertFixtureMessages(adapted.messages);
             }
@@ -209,15 +221,16 @@ export class RingCentralIncomingPoller {
             // enter the existing intake repository, which independently validates them.
             let intakeDuplicate = false;
             if (this.o.mode === 'offline' && this.o.fixture?.receiver) {
-              const received = await this.o.fixture.receiver.receive({ syntheticData: true, event: fixtureEvent });
+              const received = await this.o.fixture.receiver.receive({ syntheticData: true, event: fixtureEvent, messageStoreRecords: storeRecords });
               if (received.kind === 'conflict') fail('intake_conflict');
               if (received.kind !== 'observed' && received.kind !== 'duplicate') fail('intake_incomplete');
               intakeDuplicate = received.kind === 'duplicate';
             }
             if (this.o.mode === 'offline' && this.o.fixture?.processor) {
-              const adapted = adaptRingCentral(fixtureEvent, scope!);
+              const adapted = adaptRingCentral(fixtureEvent, scope!, storeRecords);
               if (adapted.kind !== 'messages') fail('record_invalid');
-              await this.o.fixture.processor.process(adapted.messages[0]);
+              if (direction === 'Outbound') await this.o.fixture.processor.observeOutbound!(adapted.messages[0]);
+              else await this.o.fixture.processor.process(adapted.messages[0]);
             }
             this.#guard(); state.seen.push({ hash, createdAt: iso(created) }); seen.add(hash); await save(state);
             if (intakeDuplicate) report.duplicates++; else report.newMessages++;

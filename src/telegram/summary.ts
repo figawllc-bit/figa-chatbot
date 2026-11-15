@@ -1,7 +1,7 @@
 import { hasSensitiveInput } from '../safety';
 import { isUUID } from '../validation';
 import { record } from './update';
-import type { BotMode, StaffAction, StaffSummary, TelegramMessage } from './types';
+import type { BotMode, EffectiveBotMode, OfficeHours, StaffAction, StaffSummary, TelegramMessage } from './types';
 
 // Deliberately exclude names, organizations, notes, experience and message bodies.
 export function staffMessage(value: StaffSummary, chat: number, heading='Conversation summary',actions:readonly StaffAction[]=[]): TelegramMessage {
@@ -31,17 +31,38 @@ export function staffMessage(value: StaffSummary, chat: number, heading='Convers
   return {chat_id:chat,text:lines.join('\n'),protect_content:true,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:buttons.length?[buttons]:[]}};
 }
 
-const modeText:Record<BotMode,string>={
+const effectiveText:Record<EffectiveBotMode,string>={
   away:'AWAY - the bot is answering caregiver and provider texts automatically.',
   on_duty:'ON DUTY - staff are answering. The bot stays silent and alerts you to each new text.',
   paused:'PAUSED - the bot is off. It will not reply to or send any text.',
 };
+const dayNames=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+/** "Mon-Fri 08:00-17:00, Sat 09:00-12:00", grouping consecutive days with the same window. */
+export function formatOfficeHours(hours:OfficeHours):string {
+  const groups:{from:number;to:number;window:string}[]=[];
+  for(let d=1;d<=7;d++) {
+    const w=hours[String(d) as keyof OfficeHours];
+    if(!w) continue;
+    const window=`${w[0]}-${w[1]}`,last=groups.at(-1);
+    if(last&&last.to===d-1&&last.window===window) last.to=d; else groups.push({from:d,to:d,window});
+  }
+  return groups.length?groups.map(g=>`${dayNames[g.from-1]}${g.to>g.from?'-'+dayNames[g.to-1]:''} ${g.window}`).join(', '):'none set';
+}
 /** Global bot mode status. Buttons are shown only to staff allowed to change it. */
-export function modeMessage(mode: BotMode, chat: number, canChange: boolean, heading='Bot mode'): TelegramMessage {
-  if (!(mode in modeText)) throw new Error('Invalid bot mode.');
-  const lines=[heading,modeText[mode],'Per-conversation Take Over / Return to AI still apply.'];
-  const options:[BotMode,string][]=[['away','Away (bot answers)'],['on_duty','On Duty (staff answer)'],['paused','Pause all']];
+export function modeMessage(status:{mode:BotMode;effective:EffectiveBotMode;hours?:OfficeHours;timezone?:string}, chat: number, canChange: boolean, heading='Bot mode'): TelegramMessage {
+  const {mode,effective}=status;
+  if (!['auto','away','on_duty','paused'].includes(mode) || !(effective in effectiveText) || (mode!=='auto'&&mode!==effective)) throw new Error('Invalid bot mode.');
+  const lines=[heading];
+  if(mode==='auto') lines.push('AUTO - following office hours. Right now:');
+  lines.push(effectiveText[effective]);
+  if(status.hours) lines.push(`Office hours: ${formatOfficeHours(status.hours)} (${status.timezone??'America/Los_Angeles'})`);
+  if(mode!=='auto') lines.push('Manual setting - stays until changed. Send /auto to follow office hours.');
+  lines.push('Per-conversation Take Over / Return to AI still apply.');
+  const options:[BotMode,string][]=[['auto','Auto (office hours)'],['away','Away (bot answers)'],['on_duty','On Duty (staff answer)'],['paused','Pause all']];
   const buttons=canChange?options.filter(([m])=>m!==mode).map(([m,text])=>({text,callback_data:`fg:m:${m}`})):[];
-  if(!canChange) lines.push('You can view the mode but not change it.');
-  return {chat_id:chat,text:lines.join('\n'),protect_content:true,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:buttons.length?[buttons]:[]}};
+  if(canChange) lines.push('Change office hours: /sethours mon-fri 08:00-17:00 (or /sethours none)');
+  else lines.push('You can view the mode but not change it.');
+  // Two buttons per row so the labels stay readable on a phone.
+  const rows=[];for(let i=0;i<buttons.length;i+=2) rows.push(buttons.slice(i,i+2));
+  return {chat_id:chat,text:lines.join('\n'),protect_content:true,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:rows}};
 }

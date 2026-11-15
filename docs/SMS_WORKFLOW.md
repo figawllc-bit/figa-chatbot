@@ -29,7 +29,9 @@ Migration `20261115000300_bot_mode.sql` (pending, offline only) adds one global 
 | `/away` or `/resume` | **Away** | Staff unavailable: the bot answers caregiver and provider texts automatically. |
 | `/onduty` | **On Duty** | Staff are answering: the bot stays silent and sends a Telegram alert, with a Take Over button, for each new text. |
 | `/pause` | **Paused** | Everything off: no reply is generated or sent, and staff still get an alert for each text. |
-| `/status` | (any) | Shows the current mode, with buttons if you may change it. |
+| `/auto` | **Auto** | Follows office hours: On Duty during office hours, Away otherwise. |
+| `/sethours mon-fri 08:00-17:00 sat 09:00-12:00` | (schedule) | Replaces the office hours (Pacific time). `/sethours none` clears them, so Auto means always Away. |
+| `/status` or `/hours` | (any) | Shows the mode, what the bot is doing right now, and the office hours, with buttons if you may change them. |
 
 - A fresh database starts **Paused**.
 - Changing the mode needs the new roster permission `bot_mode`; `view` can only see the status. Every change is announced to all rostered staff.
@@ -38,7 +40,17 @@ Migration `20261115000300_bot_mode.sql` (pending, offline only) adds one global 
 - Per-conversation **Take Over / Return to AI / Resolve** work unchanged on top of this.
 - The Cloudflare variables `AI_GLOBAL_PAUSED` and `RINGCENTRAL_POLLING_PAUSED` remain a second emergency stop.
 
-Not built yet: automatic office-hours switching, and detecting replies staff send by hand from the RingCentral app (only incoming texts are polled). Use **On Duty** while staff are answering by hand.
+**Office hours** (migration `20261115000400_office_hours_hand_replies.sql`):
+- Away, On Duty and Paused are manual settings that stay until changed; Auto follows the schedule.
+- The default schedule is a placeholder (Mon–Fri 08:00–17:00 Pacific); set the real one with `/sethours`.
+- Holidays are not handled; use `/onduty` or `/pause` for them.
+
+**Hand replies:**
+- When the workflow is attached, the poller also downloads outgoing texts and handles them before incoming ones on the same page.
+- An outgoing text the bot did not send (staff replying from the RingCentral app) places a review hold on that conversation. The bot stops there at once, even for a customer text that arrived just before the staff reply, and staff get a Telegram alert.
+- To hand the conversation back, press **Take Over**, then **Return to AI** (or **Resolve**); that clears the hold.
+- The bot's own sent replies are recognised by their RingCentral message ID and never trigger a hold. A send whose result was uncertain is treated as unknown, so it also holds the thread for staff review, which is the safe choice.
+- Limit: ordering is per page of 20 texts, so in a very busy two-minute window a staff reply on a later page could be seen one page late.
 
 ## Activation is still blocked
 

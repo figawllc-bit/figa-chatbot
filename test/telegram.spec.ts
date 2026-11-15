@@ -1,8 +1,8 @@
 import { describe,expect,it,vi } from 'vitest';
 import worker from '../src/index';
 import { StaffBot } from '../src/telegram/bot';
-import { parseTelegramUpdate } from '../src/telegram/update';
-import { modeMessage, staffMessage } from '../src/telegram/summary';
+import { parseOfficeHours, parseTelegramUpdate } from '../src/telegram/update';
+import { formatOfficeHours, modeMessage, staffMessage } from '../src/telegram/summary';
 import { SimulatedTelegramTransport,BotAPITransport,TelegramTransportError } from '../src/telegram/transport';
 import { telegramWebhook,TelegramPoller } from '../src/telegram/ingress';
 import type { StaffRepository,StaffSummary } from '../src/telegram/types';
@@ -20,7 +20,8 @@ function fixture() {
     pending:vi.fn<StaffRepository['pending']>().mockResolvedValue({kind:'ok',notifications:[{id,leaseToken:id}]}),
     notification:vi.fn<StaffRepository['notification']>().mockResolvedValue({id,kind:'urgent',conversation:summary()}),
     acknowledge:vi.fn<StaffRepository['acknowledge']>().mockResolvedValue(true),
-    mode:vi.fn<StaffRepository['mode']>().mockResolvedValue({kind:'ok',mode:'paused',canChange:true}),
+    mode:vi.fn<StaffRepository['mode']>().mockResolvedValue({kind:'ok',mode:'paused',effective:'paused',canChange:true}),
+    hours:vi.fn<StaffRepository['hours']>().mockResolvedValue({kind:'ok',mode:'auto',effective:'away',hours:{},canChange:true}),
   };
   const transport=new SimulatedTelegramTransport();return {repository,transport,bot:new StaffBot(repository,transport)};
 }
@@ -141,13 +142,13 @@ describe('Telegram global bot mode (Away / On Duty / Pause all)',()=>{
     expect(parseTelegramUpdate(text('/pause now'))).toBeNull();
   });
   it('a change is announced to every roster member; only the changer gets buttons',async()=>{
-    const f=fixture();f.repository.mode.mockResolvedValue({kind:'applied',mode:'on_duty',canChange:true});
+    const f=fixture();f.repository.mode.mockResolvedValue({kind:'applied',mode:'on_duty',effective:'on_duty',hours:{'1':['08:00','17:00'],'2':['08:00','17:00']},timezone:'America/Los_Angeles',canChange:true});
     f.repository.recipients.mockResolvedValue([{actor:10001,chat:10001},{actor:10002,chat:10002}]);
     expect(await f.bot.handle(text('/onduty'))).toBe('applied');
     expect(f.repository.mode).toHaveBeenCalledWith(expect.objectContaining({mode:'on_duty',actor:10001}),expect.stringMatching(/^[a-f0-9]{64}$/));
     expect(f.repository.process).not.toHaveBeenCalled();
     const [mine,theirs]=f.transport.messages;
-    expect(mine.chat_id).toBe(10001);expect(mine.text).toMatch(/ON DUTY/);expect(mine.reply_markup.inline_keyboard[0].map(b=>b.callback_data)).toEqual(['fg:m:away','fg:m:paused']);
+    expect(mine.chat_id).toBe(10001);expect(mine.text).toMatch(/ON DUTY/);expect(mine.reply_markup.inline_keyboard.flat().map(b=>b.callback_data)).toEqual(['fg:m:auto','fg:m:away','fg:m:paused']);expect(mine.text).toMatch(/Office hours: Mon-Tue 08:00-17:00 \(America\/Los_Angeles\)/);
     expect(theirs.chat_id).toBe(10002);expect(theirs.text).toMatch(/by a staff member/);expect(theirs.reply_markup.inline_keyboard).toEqual([]);
   });
   it('denied changes send nothing, and a single-conversation test scope can never switch the global mode',async()=>{
@@ -156,7 +157,40 @@ describe('Telegram global bot mode (Away / On Duty / Pause all)',()=>{
     expect(await f.bot.handle(text('/pause'),{actor:10001,conversationId:id})).toBe('ignored');expect(f.repository.mode).toHaveBeenCalledTimes(1);
   });
   it('view-only status has no buttons',()=>{
-    expect(modeMessage('paused',1,false).reply_markup.inline_keyboard).toEqual([]);
-    expect(modeMessage('paused',1,true).text).toMatch(/PAUSED - the bot is off/);
+    expect(modeMessage({mode:'paused',effective:'paused'},1,false).reply_markup.inline_keyboard).toEqual([]);
+    expect(modeMessage({mode:'paused',effective:'paused'},1,true).text).toMatch(/PAUSED - the bot is off/);
+  });
+});
+
+describe('Telegram office hours (/auto, /sethours)',()=>{
+  const text=(t:string,actor=10001)=>({update_id:11,message:{from:{id:actor,is_bot:false},chat:{id:actor,type:'private'},text:t}});
+  it('parses day ranges, lists and multiple windows',()=>{
+    expect(parseOfficeHours('mon-fri 08:00-17:00 sat 09:00-12:00')).toEqual({'1':['08:00','17:00'],'2':['08:00','17:00'],'3':['08:00','17:00'],'4':['08:00','17:00'],'5':['08:00','17:00'],'6':['09:00','12:00']});
+    expect(parseOfficeHours('Mon,Wed 07:30-24:00')).toEqual({'1':['07:30','24:00'],'3':['07:30','24:00']});
+    expect(parseOfficeHours('none')).toEqual({});
+  });
+  it.each(['mon-fri','mon-fri 17:00-08:00','fri-mon 08:00-17:00','mon 8-5','mon 08:00-17:00 mon 09:00-10:00','funday 08:00-17:00','mon 25:00-26:00'])('rejects %s',spec=>{
+    expect(parseOfficeHours(spec)).toBeNull();expect(parseTelegramUpdate(text('/sethours '+spec))).toBeNull();
+  });
+  it('maps /auto, /hours and the Auto button to the mode action',()=>{
+    expect(parseTelegramUpdate(text('/auto'))).toMatchObject({action:'mode',mode:'auto'});
+    expect(parseTelegramUpdate(text('/hours'))).toMatchObject({action:'mode',mode:null});
+    expect(parseTelegramUpdate(callback(10001,'fg:m:auto'))).toMatchObject({action:'mode',mode:'auto'});
+    expect(parseTelegramUpdate(text('/sethours mon-fri 08:00-17:00'))).toMatchObject({action:'hours',hours:{'5':['08:00','17:00']}});
+  });
+  it('sends /sethours to the hours RPC and announces the change',async()=>{
+    const f=fixture();f.repository.hours.mockResolvedValue({kind:'applied',mode:'auto',effective:'on_duty',hours:{'1':['09:00','15:00']},timezone:'America/Los_Angeles',canChange:true});
+    expect(await f.bot.handle(text('/sethours mon 09:00-15:00'))).toBe('applied');
+    expect(f.repository.hours).toHaveBeenCalledWith(expect.objectContaining({hours:{'1':['09:00','15:00']}}),expect.any(String));expect(f.repository.mode).not.toHaveBeenCalled();
+    const msg=f.transport.messages[0];expect(msg.text).toMatch(/^Office hours changed\nAUTO - following office hours\. Right now:\nON DUTY/);expect(msg.text).toMatch(/Mon 09:00-15:00/);
+  });
+  it('formats grouped hours and refuses an inconsistent manual status',()=>{
+    expect(formatOfficeHours({'1':['08:00','17:00'],'2':['08:00','17:00'],'3':['08:00','17:00'],'6':['09:00','12:00']})).toBe('Mon-Wed 08:00-17:00, Sat 09:00-12:00');
+    expect(formatOfficeHours({})).toBe('none set');
+    expect(()=>modeMessage({mode:'away',effective:'paused'},1,true)).toThrow();
+  });
+  it('labels hand-reply alerts for staff',async()=>{
+    const f=fixture();f.repository.notification.mockResolvedValue({id,kind:'hand_reply',conversation:summary()});
+    expect(await f.bot.notify(10001,10001)).toBe(1);expect(f.transport.messages[0].text).toMatch(/^Bot stopped on this conversation: someone replied to the customer by hand/);
   });
 });
