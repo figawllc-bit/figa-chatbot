@@ -38,6 +38,10 @@ export async function scheduledMonitoring(env: MonitoringEnvironment, override?:
   await scheduledPolling(env, override ?? { poll: async () => {
     if (!env.RINGCENTRAL_MONITOR || env.RINGCENTRAL_MONITORING_SECURITY_APPROVED !== 'true') throw new Error('Monitoring unavailable.');
     const stub = env.RINGCENTRAL_MONITOR.get(env.RINGCENTRAL_MONITOR.idFromName(KEY));
-    return stub.poll();
+    const report = await stub.poll();
+    // Counts and categories only: no message text, phone numbers, IDs or tokens.
+    console.info('figa_rc_poll', { status: report.status, newMessages: report.newMessages, duplicates: report.duplicates, excluded: report.excluded,
+      errors: report.errors, errorCategory: report.errorCategory ?? null, httpStatus: report.httpStatus ?? null, oauthErrorCode: report.oauthErrorCode ?? null });
+    return report;
   } });
 }
