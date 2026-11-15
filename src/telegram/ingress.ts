@@ -34,12 +34,15 @@ export async function telegramWebhook(request:Request,env:TelegramEnvironment,cr
 // No polling loop or webhook registration is started by importing this module.
 export class TelegramPoller {
   constructor(private readonly source:Pick<BotAPITransport,'updates'>,private readonly bot:StaffBot) {}
-  async once(offset:number):Promise<number> {
+  /** onResult receives only the outcome word for each update (ok/denied/ignored...), never content. */
+  async once(offset:number,onResult?:(kind:string)=>void):Promise<number> {
     const updates=await this.source.updates(offset);let next=offset;
     for(const raw of updates) {
       const id=record(raw).update_id;
       if(!Number.isSafeInteger(id)||Number(id)<offset||Number(id)>=Number.MAX_SAFE_INTEGER)throw new Error('Invalid polling update.');
-      await this.bot.handle(raw);
+      // Always handle first: `onResult?.(await handle())` would skip handling when no callback is given.
+      const kind=await this.bot.handle(raw);
+      onResult?.(kind);
       next=Math.max(next,Number(id)+1);
     }
     await this.bot.dispatch();

@@ -37,9 +37,10 @@ export class DurablePollingStore implements PollingStateStore {
   }
 }
 
-export interface StaffPollReport { status: 'disabled' | 'ok' | 'error'; processed: number; failure?: 'telegram' | 'database' | 'other'; httpStatus?: number | null; code?: string | null; keyCheck?: number | null }
+export interface StaffPollReport { status: 'disabled' | 'ok' | 'error'; processed: number; failure?: 'telegram' | 'database' | 'other'; httpStatus?: number | null; code?: string | null; keyCheck?: number | null; bot?: string | null; webhookSet?: boolean | null; results?: Record<string, number> }
 export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
   private poller?: RingCentralIncomingPoller;
+  private botIdentityLogged = false;
   async poll(): Promise<PollReport> {
     const controls = pollingControls(this.env);
     if (!RINGCENTRAL_POLLING_LIVE_ENABLED || !controls.enabled || controls.paused || this.env.RINGCENTRAL_MONITORING_SECURITY_APPROVED !== 'true')
@@ -62,9 +63,18 @@ export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
       const offset = (await this.ctx.storage.get<number>('telegram-offset')) ?? 0;
       try {
         // The offset advances only after updates are handled; update-ID dedupe in SQL covers a crash in between.
-        const next = await new TelegramPoller(staff.transport, staff.bot).once(offset);
+        const results: Record<string, number> = {};
+        const next = await new TelegramPoller(staff.transport, staff.bot).once(offset, kind => { results[kind] = (results[kind] ?? 0) + 1; });
         if (next !== offset) await this.ctx.storage.put('telegram-offset', next);
-        return { status: 'ok' as const, processed: next - offset };
+        // Once per isolate: which bot this token belongs to (public username) and whether a webhook
+        // would divert updates, so staff can confirm they are messaging the right bot.
+        let bot: string | null | undefined, webhookSet: boolean | null | undefined;
+        if (!this.botIdentityLogged) {
+          this.botIdentityLogged = true;
+          try { bot = '@' + (await staff.transport.getMe()).username; } catch { bot = null; }
+          try { webhookSet = (await staff.transport.getWebhookInfo()).url !== ''; } catch { webhookSet = null; }
+        }
+        return { status: 'ok' as const, processed: next - offset, results, ...(bot !== undefined ? { bot, webhookSet } : {}) };
       } catch (error) {
         // Category only. No Telegram bodies, tokens or database responses in logs.
         const failure = error instanceof TelegramTransportError ? 'telegram' as const : error instanceof DatabaseError ? 'database' as const : 'other' as const;
