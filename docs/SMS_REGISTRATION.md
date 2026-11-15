@@ -31,6 +31,6 @@ Carriers require business texting numbers to be registered before automated repl
 Include a sentence like: "Mobile numbers and SMS opt-in information are not shared with or sold to third parties for marketing purposes." Also state that message and data rates may apply and that people can reply STOP to opt out or HELP for help.
 
 ## Notes
-- Register only the one number the bot answers on (`RINGCENTRAL_SMS_FROM_NUMBER`). Voice access to a shared number does not make it SMS-capable.
+- Register the numbers the bot answers on (`RINGCENTRAL_SMS_NUMBERS`: +15039057215 and +15039051648). Voice access to a shared number does not make it SMS-capable.
 - Some carriers or RingCentral may also answer STOP/HELP themselves. If you see double help replies once live, tell us and the bot's HELP reply can be turned off.
 - These samples come from the rule-based replies; with Gemma approved the wording of follow-up questions stays the same, because the application, not the AI, writes every reply.

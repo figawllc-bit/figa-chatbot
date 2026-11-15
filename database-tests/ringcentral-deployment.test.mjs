@@ -21,7 +21,10 @@ test('disabled deployment pins the Worker entrypoint, SQLite migration, Cron and
   assert.match(worker, /export \{ default \} from '\.\/index'/);
   assert.match(worker, /export \{ RingCentralMonitor \}/);
   const poller = await readFile(new URL('../src/ringcentral/polling.ts', import.meta.url), 'utf8');
-  assert.match(poller, /RINGCENTRAL_POLLING_LIVE_ENABLED = false/);
+  // Reading approved in code (stage 2); sending stays locked until the test text.
+  assert.match(poller, /RINGCENTRAL_POLLING_LIVE_ENABLED = true/);
+  const sender = await readFile(new URL('../src/ringcentral/sms-sender.ts', import.meta.url), 'utf8');
+  assert.match(sender, /RINGCENTRAL_SMS_DELIVERY_ENABLED = false/);
   const policy = await readFile(new URL('../src/ringcentral/policy.ts', import.meta.url), 'utf8');
   assert.match(policy, /phase7a_receive_only/);
 });

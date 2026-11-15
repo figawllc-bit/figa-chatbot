@@ -7,9 +7,10 @@ import type { OfflineRingCentralReceiver } from './receiver';
 import { assertFixtureScope, assertFixtureMessages } from './fixture-policy';
 import { adaptRingCentral, type AdaptedEvent, type RingCentralScope, type SmsObservation } from './events';
 
-export const RINGCENTRAL_POLLING_LIVE_ENABLED = false;
+// Reading real texts approved by FIGA on 2026-11-15 (stage 2). Env switches and the polling approval still gate it.
+export const RINGCENTRAL_POLLING_LIVE_ENABLED = true;
 /** Reviewed code change required before real customer texts are processed (re-exported by production/runtime). */
-export const RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED = false;
+export const RINGCENTRAL_PRODUCTION_PROCESSING_ENABLED = true;
 export const POLLING_OWNER_ID = '3322425015';
 const HOST = 'https://platform.ringcentral.com';
 const PAGE_SIZE = 20, MAX_PAGES = 3, OVERLAP_MS = 120000, SETTLE_MS = 10000, MAX_WINDOW_MS = 604800000;

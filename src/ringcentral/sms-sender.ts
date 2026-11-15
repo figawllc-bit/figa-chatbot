@@ -7,13 +7,13 @@ export interface SmsPayload { from: string; to: string; text: string }
 export type SmsResult = { kind: 'accepted'; messageId: string } | { kind: 'suppressed' | 'uncertain' | 'failed'; category: string; httpStatus?: number };
 export interface SmsSender { send(payload: SmsPayload, authorize: () => Promise<boolean>): Promise<SmsResult> }
 export class RingCentralSmsSender implements SmsSender {
-  constructor(private readonly options: { mode: 'offline' | 'live'; grant: () => Promise<SmsGrant>; http: HttpsExecutor; sender: string; enabled: () => boolean; privacyApproved: () => boolean }) {}
+  constructor(private readonly options: { mode: 'offline' | 'live'; grant: () => Promise<SmsGrant>; http: HttpsExecutor; sender: string | readonly string[]; enabled: () => boolean; privacyApproved: () => boolean }) {}
   async send(p: SmsPayload, authorize: () => Promise<boolean>): Promise<SmsResult> {
     const o = this.options;
     // No env switch or injected executor can override the source live gate.
     if (o.mode !== 'offline' && (o.mode !== 'live' || !RINGCENTRAL_SMS_DELIVERY_ENABLED || !o.enabled() || !o.privacyApproved())) return { kind: 'suppressed', category: 'sending_disabled' };
     if (o.mode === 'offline' && (!isOfflineExecutor(o.http) || !/^\+150355501(?:00|01)$/.test(p.from) || !/^\+150355501\d{2}$/.test(p.to))) return { kind: 'suppressed', category: 'fixture_required' };
-    if (p.from !== o.sender || p.from === p.to || !/^\+[1-9]\d{7,14}$/.test(p.from) || !/^\+[1-9]\d{7,14}$/.test(p.to) || !p.text.trim() || p.text.length > 1000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(p.text)) return { kind: 'failed', category: 'invalid_payload' };
+    if (![o.sender].flat().includes(p.from) || p.from === p.to || !/^\+[1-9]\d{7,14}$/.test(p.from) || !/^\+[1-9]\d{7,14}$/.test(p.to) || !p.text.trim() || p.text.length > 1000 || /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(p.text)) return { kind: 'failed', category: 'invalid_payload' };
     let invoked = false;
     const abort = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;

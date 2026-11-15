@@ -36,7 +36,7 @@ for (const name of ['FIGA_PRIVACY_APPROVED', 'RINGCENTRAL_MONITORING_SECURITY_AP
   'TELEGRAM_STAFF_ENABLED', 'TELEGRAM_LIVE_ENABLED', 'TELEGRAM_POLLING_ENABLED', 'AI_ENABLED', 'AI_PRODUCTION_DATA_APPROVED', 'RINGCENTRAL_SMS_SENDING_ENABLED'])
   console.log(mark(vars[name] === 'true') + `${name} = ${vars[name] ?? '(unset)'}`);
 for (const name of ['RINGCENTRAL_POLLING_PAUSED', 'AI_GLOBAL_PAUSED']) console.log(mark(vars[name] === 'false') + `${name} = ${vars[name] ?? '(unset)'}  (emergency stop; must be false to run)`);
-for (const name of ['RINGCENTRAL_ACCOUNT_ID', 'RINGCENTRAL_SMS_FROM_NUMBER', 'SUPABASE_PRODUCTION_PROJECT_REF', 'SUPABASE_PRODUCTION_URL'])
+for (const name of ['RINGCENTRAL_ACCOUNT_ID', 'RINGCENTRAL_SMS_NUMBERS', 'SUPABASE_PRODUCTION_PROJECT_REF', 'SUPABASE_PRODUCTION_URL'])
   console.log(mark(Boolean(vars[name])) + `${name} ${vars[name] ? 'set' : 'empty'}`);
 console.log('\nCloudflare secrets for env production:');
 if (!present) console.log('  (not checked: run `npx wrangler login`, or remove --offline)');

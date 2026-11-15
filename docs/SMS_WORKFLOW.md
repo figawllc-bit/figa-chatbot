@@ -94,7 +94,7 @@ This exact sequence (bundle → configure → add staff → staff `/status`) is 
 **D. Cloudflare** (everything is prepared in `wrangler.jsonc` `env.production`; deploy with `--env production`)
 1. Upgrade to Workers Paid (recommended). Free allows 10 ms CPU per invocation (including Cron), 100,000 requests/day, 5 Cron Triggers, and 10,000 Workers AI neurons/day. Gemma 4 26B costs 9,091 neurons per million input tokens and 27,273 per million output tokens, so roughly 19 neurons per turn (assuming about 1,500 input and 200 output tokens). That gives about 500 turns/day, which 200 contacts with several turns each can exceed.
 2. Secrets via `npx wrangler secret put <NAME> --env production` (never vars): `RINGCENTRAL_CLIENT_ID`, `RINGCENTRAL_CLIENT_SECRET`, `RINGCENTRAL_JWT` (read-only app), `RINGCENTRAL_POLLING_APPROVAL_JSON`, `RINGCENTRAL_SMS_CLIENT_ID`, `RINGCENTRAL_SMS_CLIENT_SECRET`, `RINGCENTRAL_SMS_JWT` (SMS app), `SUPABASE_PRODUCTION_SECRET_KEY`, and the rotated `TELEGRAM_BOT_TOKEN`.
-3. Vars in `env.production`: `RINGCENTRAL_ACCOUNT_ID`, `RINGCENTRAL_SMS_FROM_NUMBER`, `SUPABASE_PRODUCTION_PROJECT_REF`, `SUPABASE_PRODUCTION_URL`, then the switches for each stage below.
+3. Vars in `env.production`: `RINGCENTRAL_ACCOUNT_ID`, `RINGCENTRAL_SMS_NUMBERS` (comma-separated), `SUPABASE_PRODUCTION_PROJECT_REF`, `SUPABASE_PRODUCTION_URL`, then the switches for each stage below.
 4. Emergency stop: set `AI_GLOBAL_PAUSED=true` or `RINGCENTRAL_POLLING_PAUSED=true` in the dashboard, or `/pause` in Telegram. All are checked before every poll, every inference and immediately before every SMS POST.
 
 **E. Staged activation** (each stage separately authorized; run `npm run preflight` before each)

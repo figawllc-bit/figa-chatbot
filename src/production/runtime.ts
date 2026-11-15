@@ -26,8 +26,9 @@ export interface ProductionEnvironment extends MonitoringEnvironment, AIEnvironm
   FIGA_PRIVACY_APPROVED?: string;
   /** Numeric RingCentral account ID; must equal figa_deployment.rc_account_id. */
   RINGCENTRAL_ACCOUNT_ID?: string;
-  /** The single approved, SMS-enabled, registered E.164 number the bot answers on and sends from. */
-  RINGCENTRAL_SMS_FROM_NUMBER?: string;
+  /** Comma-separated approved, SMS-enabled, registered E.164 numbers on extension 101. The bot answers
+   *  texts to any of them and replies from the number the customer texted. Must match figa_deployment. */
+  RINGCENTRAL_SMS_NUMBERS?: string;
   RINGCENTRAL_SMS_SENDING_ENABLED?: string;
   // Separate RingCentral app with exactly SMS + ReadMessages (the read-only app stays unchanged).
   RINGCENTRAL_SMS_CLIENT_ID?: string;
@@ -48,6 +49,11 @@ export interface ProductionReadiness {
   telegram: string[];
 }
 const e164 = /^\+[1-9]\d{7,14}$/;
+/** The configured texting numbers, or [] if the setting is missing or any entry is malformed. */
+export function smsNumbers(env: ProductionEnvironment): string[] {
+  const list = (env.RINGCENTRAL_SMS_NUMBERS ?? '').split(',').map(n => n.trim()).filter(Boolean);
+  return list.length >= 1 && list.length <= 5 && list.every(n => e164.test(n)) && new Set(list).size === list.length ? list : [];
+}
 const has = (v?: string) => typeof v === 'string' && v.length > 0;
 export function productionReadiness(env: ProductionEnvironment): ProductionReadiness {
   const processing: string[] = [], sending: string[] = [], ai: string[] = [], telegram: string[] = [];
@@ -61,7 +67,7 @@ export function productionReadiness(env: ProductionEnvironment): ProductionReadi
   if (controls.paused) processing.push('var: RINGCENTRAL_POLLING_PAUSED / AI_GLOBAL_PAUSED is on');
   for (const name of ['RINGCENTRAL_CLIENT_ID', 'RINGCENTRAL_CLIENT_SECRET', 'RINGCENTRAL_JWT'] as const) if (!has(env[name])) processing.push('secret: ' + name);
   if (!/^[1-9]\d{0,63}$/.test(env.RINGCENTRAL_ACCOUNT_ID ?? '')) processing.push('var: RINGCENTRAL_ACCOUNT_ID');
-  if (!e164.test(env.RINGCENTRAL_SMS_FROM_NUMBER ?? '')) processing.push('var: RINGCENTRAL_SMS_FROM_NUMBER');
+  if (!smsNumbers(env).length) processing.push('var: RINGCENTRAL_SMS_NUMBERS');
   if (!productionDatabaseConfiguration(env).configured) processing.push('secret/var: SUPABASE_PRODUCTION_* (separate production project)');
   if (!RINGCENTRAL_SMS_DELIVERY_ENABLED) sending.push('code: RINGCENTRAL_SMS_DELIVERY_ENABLED is false');
   if (env.RINGCENTRAL_SMS_SENDING_ENABLED !== 'true') sending.push('var: RINGCENTRAL_SMS_SENDING_ENABLED');
@@ -79,7 +85,7 @@ export function productionReadiness(env: ProductionEnvironment): ProductionReadi
 
 /** The extension/number the bot answers on. Must match the production database's deployment profile. */
 export function productionScope(env: ProductionEnvironment): RingCentralScope {
-  return { accountId: env.RINGCENTRAL_ACCOUNT_ID ?? '', extensionId: POLLING_OWNER_ID, subscriptionId: 'figa-polling', businessNumbers: [env.RINGCENTRAL_SMS_FROM_NUMBER ?? ''] };
+  return { accountId: env.RINGCENTRAL_ACCOUNT_ID ?? '', extensionId: POLLING_OWNER_ID, subscriptionId: 'figa-polling', businessNumbers: smsNumbers(env) };
 }
 
 /** One SMS-app grant per isolate, reused until shortly before expiry (RingCentral auth calls are rate limited). */
@@ -106,7 +112,7 @@ export const workerFetch: typeof fetch = (input, init) => fetch(input, init);
 export function productionWorkflow(env: ProductionEnvironment, http: typeof fetch = workerFetch): SmsWorkflow | null {
   if (productionReadiness(env).processing.length) return null;
   const controls = () => ({ paused: pollingControls(env).paused, sendingEnabled: env.RINGCENTRAL_SMS_SENDING_ENABLED === 'true' });
-  const sender = new RingCentralSmsSender({ mode: 'live', grant: cachedSmsGrant(env, http), http, sender: env.RINGCENTRAL_SMS_FROM_NUMBER!,
+  const sender = new RingCentralSmsSender({ mode: 'live', grant: cachedSmsGrant(env, http), http, sender: smsNumbers(env),
     enabled: () => controls().sendingEnabled && !controls().paused, privacyApproved: () => env.FIGA_PRIVACY_APPROVED === 'true' });
   // Diagnostics carry categories only, never message text.
   const engine = new HybridEngine(env, undefined, diagnostic => console.warn('figa_ai_failure', diagnostic));

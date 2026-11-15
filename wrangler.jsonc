@@ -40,20 +40,23 @@
 			// Staged go-live adds secrets step by step; productionReadiness() names any that are missing.
 			"secrets": { "required": [] },
 			"vars": {
-				"FIGA_PRIVACY_APPROVED": "false",
-				"RINGCENTRAL_MONITORING_SECURITY_APPROVED": "false",
-				"RINGCENTRAL_POLLING_ENABLED": "false",
-				"RINGCENTRAL_POLLING_PAUSED": "true",
+				// Stage 2 (approved 2026-11-15): read real texts on extension 101, draft replies with Gemma.
+				"FIGA_PRIVACY_APPROVED": "true",
+				"RINGCENTRAL_MONITORING_SECURITY_APPROVED": "true",
+				"RINGCENTRAL_POLLING_ENABLED": "true",
+				"RINGCENTRAL_POLLING_PAUSED": "false",
 				"RINGCENTRAL_POLL_INTERVAL_SECONDS": "120",
-				"RINGCENTRAL_ACCOUNT_ID": "",
-				"RINGCENTRAL_SMS_FROM_NUMBER": "",
+				"RINGCENTRAL_ACCOUNT_ID": "3322425015",
+				// FIGA business numbers on extension 101 (public); replies go out from the number the customer texted.
+				"RINGCENTRAL_SMS_NUMBERS": "+15039057215,+15039051648",
+				// Sending stays OFF until the SMS app exists and one test text to a staff phone succeeds.
 				"RINGCENTRAL_SMS_SENDING_ENABLED": "false",
 				"RINGCENTRAL_OFFLINE_ENABLED": "false",
-				"AI_GLOBAL_PAUSED": "true",
-				"AI_ENABLED": "false",
+				"AI_GLOBAL_PAUSED": "false",
+				"AI_ENABLED": "true",
 				"AI_PROVIDER": "workers-ai",
 				"AI_ALLOW_SYNTHETIC_REQUESTS": "false",
-				"AI_PRODUCTION_DATA_APPROVED": "false",
+				"AI_PRODUCTION_DATA_APPROVED": "true",
 				"AI_TIMEOUT_MS": "8000",
 				"SUPABASE_ENABLED": "false",
 				// Stage 1: separate production project (never the development project).

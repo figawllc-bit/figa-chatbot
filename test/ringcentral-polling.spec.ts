@@ -171,13 +171,16 @@ describe('Phase 8A receive-only polling', () => {
     await vi.advanceTimersByTimeAsync(100); paused = true; await vi.advanceTimersByTimeAsync(1000);
     expect((await pending).status).toBe('paused'); expect(observe).not.toHaveBeenCalled(); expect(store.state?.seen).toEqual([]);
   });
-  it('leaves live polling and scheduled execution disabled even if all environment flags are set', async () => {
-    expect(POLLING_OWNER_ID).toBe('3322425015'); expect(RINGCENTRAL_POLLING_LIVE_ENABLED).toBe(false);
+  it('live polling needs a valid recurring approval; the schedule polls only when explicitly enabled and not paused', async () => {
+    expect(POLLING_OWNER_ID).toBe('3322425015'); expect(RINGCENTRAL_POLLING_LIVE_ENABLED).toBe(true);
     const { poller, store, http } = setup([], new Store(), { mode: 'live' });
-    expect((await poller.poll()).status).toBe('disabled'); expect(store.calls).toBe(0); expect(http.audit()).toHaveLength(0);
+    expect(await poller.poll()).toMatchObject({ status: 'error', errorCategory: 'approval_invalid' }); expect(store.calls).toBe(0); expect(http.audit()).toHaveLength(0);
     const poll = vi.fn(); const app = createWorker(undefined, undefined, { poll });
-    await app.scheduled({ cron: '*/2 * * * *', scheduledTime: Date.now(), noRetry() {} }, { RINGCENTRAL_POLLING_ENABLED: 'true' });
+    const tick = { cron: '* * * * *', scheduledTime: Date.now(), noRetry() {} };
+    await app.scheduled(tick, {}); await app.scheduled(tick, { RINGCENTRAL_POLLING_ENABLED: 'true', RINGCENTRAL_POLLING_PAUSED: 'true' });
+    await app.scheduled(tick, { RINGCENTRAL_POLLING_ENABLED: 'true', AI_GLOBAL_PAUSED: 'true' });
     expect(poll).not.toHaveBeenCalled();
+    await app.scheduled(tick, { RINGCENTRAL_POLLING_ENABLED: 'true' }); expect(poll).toHaveBeenCalledTimes(1);
   });
   it('validates interval configuration and requires explicit enablement', async () => {
     expect(pollingControls({})).toEqual({ enabled: false, paused: false, intervalSeconds: 120 });

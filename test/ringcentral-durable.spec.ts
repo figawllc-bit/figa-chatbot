@@ -82,14 +82,15 @@ describe('Phase 8B durable receive-only monitoring', () => {
     });
   });
 
-  it('keeps default scheduled integration, RPC, and credentials disabled even with env enablement', async () => {
+  it('reads no credentials and makes no request unless polling is enabled, unpaused AND security-approved', async () => {
     const touched = vi.fn(() => { throw Error('No secrets or network'); });
-    const enabled: MonitoringEnvironment = { RINGCENTRAL_POLLING_ENABLED: 'true', RINGCENTRAL_MONITORING_SECURITY_APPROVED: 'true',
-      get RINGCENTRAL_CLIENT_ID() { return touched(); }, get RINGCENTRAL_CLIENT_SECRET() { return touched(); }, get RINGCENTRAL_JWT() { return touched(); },
-      get RINGCENTRAL_MONITOR() { return touched(); } };
+    const make = (extra: Partial<MonitoringEnvironment>): MonitoringEnvironment => ({ RINGCENTRAL_POLLING_ENABLED: 'true', ...extra,
+      get RINGCENTRAL_CLIENT_ID() { return touched(); }, get RINGCENTRAL_CLIENT_SECRET() { return touched(); }, get RINGCENTRAL_JWT() { return touched(); } });
     const network = vi.spyOn(globalThis, 'fetch').mockRejectedValue(Error('No network'));
-    await createWorker().scheduled({} as ScheduledController, enabled);
-    await expect(monitoringCredentials(enabled)()).rejects.toThrow('disabled');
+    await expect(monitoringCredentials(make({}))()).rejects.toThrow('disabled');
+    await expect(monitoringCredentials(make({ RINGCENTRAL_MONITORING_SECURITY_APPROVED: 'true', RINGCENTRAL_POLLING_PAUSED: 'true' }))()).rejects.toThrow('disabled');
+    await expect(createWorker().scheduled({} as ScheduledController, make({}))).rejects.toThrow('Monitoring unavailable');
+    // The test Durable Object has no switches configured, so its poll stays disabled.
     expect(await stub().poll()).toMatchObject({ status: 'disabled', newMessages: 0 });
     expect(touched).not.toHaveBeenCalled(); expect(network).not.toHaveBeenCalled();
   });

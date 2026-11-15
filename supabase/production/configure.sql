@@ -7,7 +7,7 @@
 -- Fill in the placeholders, then run in the production project's SQL editor:
 --   <ACCOUNT_ID>     numeric RingCentral account ID (as in message-store URIs; also the Worker var RINGCENTRAL_ACCOUNT_ID)
 --   <SENDER_NUMBER>  the approved, SMS-enabled, registered E.164 number, e.g. +15035551234
---                    (also the Worker var RINGCENTRAL_SMS_FROM_NUMBER)
+--                    (also the Worker var RINGCENTRAL_SMS_NUMBERS; several numbers: array['<N1>','<N2>'])
 -- Extension owner 3322425015 is FIGA's extension 101 (the only extension the bot answers).
 begin;
 update public.figa_deployment
