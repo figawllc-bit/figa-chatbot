@@ -49,7 +49,11 @@ export class HybridEngine implements ConversationEngine {
     }
     if (requested !== 'ai') return annotate(await this.fallback.respond(input), 'deterministic');
     const config = aiConfiguration(this.env);
-    if (config.configured && !config.freeTierConfirmed && !config.syntheticTestLimit) {
+    // Real customer data reaches Gemma only with explicit production approval; otherwise the
+    // rule-based engine answers (never a developer message to a customer).
+    const production = input.productionData === true && input.syntheticData !== true;
+    if (production && !config.productionApproved) return annotate(await this.fallback.respond(input), 'deterministic', 'production_data_not_approved');
+    if (config.configured && !config.freeTierConfirmed && !config.syntheticTestLimit && !production) {
       const response = await this.fallback.respond(input);
       response.assistantResponse = 'Free-tier access has not been confirmed, so no model request was sent. ' + response.assistantResponse;
       return annotate(response, 'deterministic', 'free_tier_unconfirmed');
@@ -58,11 +62,11 @@ export class HybridEngine implements ConversationEngine {
       notifyDiagnostic(this.onDiagnostic, diagnoseFailure(undefined, 'configuration', false, this.env.AI_ENABLED === 'true' && typeof this.env.AI?.run !== 'function' ? 'binding_missing' : 'configuration_disabled'));
       return annotate(await this.fallback.respond(input), 'deterministic', 'ai_not_configured');
     }
-    if (input.syntheticData !== true || /\b(real|actual)\s+(customer|client|resident|patient|personal)\b/i.test(input.message)) {
+    if (!production && (input.syntheticData !== true || /\b(real|actual)\s+(customer|client|resident|patient|personal)\b/i.test(input.message))) {
       const state = structuredClone(input.state ?? initial());
       return annotate(result(state, 'AI testing accepts fictional data only. Confirm that this message, all prior messages, and collected details are fictional before using AI, or select deterministic mode.'), 'none', 'fictional_data_required');
     }
-    if (!config.freeTierConfirmed) {
+    if (!config.freeTierConfirmed && !production) {
       if (syntheticTestAttempts >= config.syntheticTestLimit) {
         const response = await this.fallback.respond(input);
         response.assistantResponse = 'The authorized synthetic AI test budget is exhausted. ' + response.assistantResponse;

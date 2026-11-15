@@ -23,7 +23,7 @@ export interface StaffControls { actions:StaffAction[]; summary:StaffSummary }
 export interface ControlledStaffScope { actor:number; conversationId:string }
 export type StaffResult = { kind: 'ok' | 'applied' | 'denied' | 'stale' | 'unavailable' | 'duplicate' | 'conflict'; conversations?: StaffSummary[] };
 export interface NotificationClaim { id: string; leaseToken: string }
-export interface StaffNotification { id: string; kind: 'provider' | 'caregiver' | 'urgent' | 'status' | 'message' | 'hand_reply'; conversation: StaffSummary }
+export interface StaffNotification { id: string; kind: 'provider' | 'caregiver' | 'urgent' | 'status' | 'message' | 'hand_reply' | 'review'; conversation: StaffSummary }
 export interface NotificationPreview extends StaffNotification { deliveryState:'pending'|'leased'|'delivered' }
 export interface StaffRepository {
   controls(actor:number,chat:number,id:string,revision:number|null):Promise<StaffControls|null>;

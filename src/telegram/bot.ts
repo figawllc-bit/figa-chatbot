@@ -3,7 +3,7 @@ import { parseTelegramUpdate } from './update';
 import { modeMessage, staffMessage } from './summary';
 import type { ControlledStaffScope, StaffRepository, StaffUpdate, TelegramTransport } from './types';
 
-const headings={provider:'New provider request',caregiver:'New caregiver inquiry',urgent:'Urgent staffing alert',status:'Conversation status update',message:'New text received - bot is not answering (On Duty or Paused). Reply from RingCentral.',hand_reply:'Bot stopped on this conversation: someone replied to the customer by hand. Take Over, then Return to AI to hand it back.'};
+const headings={provider:'New provider request',caregiver:'New caregiver inquiry',urgent:'Urgent staffing alert',status:'Conversation status update',message:'New text received - bot is not answering (On Duty or Paused). Reply from RingCentral.',hand_reply:'Bot stopped on this conversation: someone replied to the customer by hand. Take Over, then Return to AI to hand it back.',review:'Needs staff review: the customer asked for a person, shared sensitive details, opted out, or the bot flagged it.'};
 export class StaffBot {
   constructor(private readonly repository:StaffRepository,private readonly transport:TelegramTransport) {}
   async dispatch():Promise<number> {

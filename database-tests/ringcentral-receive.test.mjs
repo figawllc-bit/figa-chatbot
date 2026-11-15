@@ -150,7 +150,9 @@ test('Phase 7A receive-only RingCentral fixtures use real local SQL transactions
       assert.equal((await db.query("select count(*)::integer as n from public.messages where direction='outbound'")).rows[0].n, 0);
     });
     assert.equal(networkAttempts, 0); assert.equal(aiAttempts, 0); assert.equal(await count('messages'), 1); // one explicit local begin-turn fixture
-    assert.equal(await count('telegram_notifications'), fixtureNotificationCount);
+    // Pre-existing alerts are unchanged; the STOP opt-out additionally raises exactly one 'review' staff alert.
+    assert.equal(Number((await db.query("select count(*) from public.telegram_notifications where kind<>'review'")).rows[0].count), fixtureNotificationCount);
+    assert.equal(Number((await db.query("select count(*) from public.telegram_notifications where kind='review'")).rows[0].count), 1);
     console.log(JSON.stringify({ scope: 'offline_receive_only', networkAttempts, aiAttempts, outboundDeliveries: 0, publicChatMessagesCreated: 0 }));
   } finally { globalThis.fetch = originalFetch; await db.close(); }
 });

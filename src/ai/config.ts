@@ -12,13 +12,16 @@ export interface AIEnvironment {
   AI_TIMEOUT_MS?: string;
   CONVERSATION_CONTROL?: string;
   AI_GLOBAL_PAUSED?: string;
+  // Production only, after privacy/contract approval: allows Gemma on real customer messages.
+  AI_PRODUCTION_DATA_APPROVED?: string;
 }
 export function aiConfiguration(env: AIEnvironment) {
-  const configured = env.AI_ENABLED === 'true' && env.AI_PROVIDER === 'workers-ai' && env.AI_ALLOW_SYNTHETIC_REQUESTS === 'true' && typeof env.AI?.run === 'function';
+  const productionApproved = env.AI_PRODUCTION_DATA_APPROVED === 'true';
+  const configured = env.AI_ENABLED === 'true' && env.AI_PROVIDER === 'workers-ai' && (env.AI_ALLOW_SYNTHETIC_REQUESTS === 'true' || productionApproved) && typeof env.AI?.run === 'function';
   const freeTierConfirmed = env.AI_FREE_TIER_CONFIRMED === 'true';
   const testLimit = Number(env.AI_SYNTHETIC_TEST_CALLS ?? '0');
   const syntheticTestLimit = Number.isInteger(testLimit) && testLimit > 0 ? Math.min(2, testLimit) : 0;
-  const available = configured && (freeTierConfirmed || syntheticTestLimit > 0);
+  const available = configured && (freeTierConfirmed || productionApproved || syntheticTestLimit > 0);
   const timeout = Number(env.AI_TIMEOUT_MS ?? '8000');
-  return { available, configured, freeTierConfirmed, syntheticTestLimit, provider: 'workers-ai' as const, model: WORKERS_AI_MODEL, timeoutMs: Number.isFinite(timeout) ? Math.min(15000, Math.max(1000, timeout)) : 8000 };
+  return { available, configured, productionApproved, freeTierConfirmed, syntheticTestLimit, provider: 'workers-ai' as const, model: WORKERS_AI_MODEL, timeoutMs: Number.isFinite(timeout) ? Math.min(15000, Math.max(1000, timeout)) : 8000 };
 }

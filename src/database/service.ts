@@ -24,8 +24,11 @@ export function safeState(snapshot: ConversationSnapshot) {
 export class PersistentChatService {
   constructor(private readonly repository: ConversationRepository, private readonly engine: ConversationEngine) {}
   async respond(input: ChatRequest, token: string): Promise<ChatResponse> {
-    if (input.syntheticData !== true) throw new PersistenceError(400, 'Persistent testing requires fictional-data confirmation.');
-    if (hasSensitiveInput({ message: input.message })) throw new PersistenceError(422, 'Sensitive information is not accepted for storage.');
+    const production = input.productionData === true && input.syntheticData !== true;
+    if (input.syntheticData !== true && !production) throw new PersistenceError(400, 'Persistent testing requires fictional-data confirmation.');
+    // Development storage refuses sensitive text. A production SMS has already been received, so
+    // it is stored and routed to staff (the engine never sends it to AI) instead of failing forever.
+    if (!production && hasSensitiveInput({ message: input.message })) throw new PersistenceError(422, 'Sensitive information is not accepted for storage.');
     if (!input.conversationId || !input.messageId) throw new PersistenceError(400, 'conversationId and messageId are required for persistent messages.');
     const turn = { conversationId: input.conversationId, messageId: input.messageId, message: input.message,
       tokenHash: await digest(token), requestHash: await digest(JSON.stringify([input.message, input.engine ?? 'deterministic'])) };
@@ -44,7 +47,9 @@ export class PersistentChatService {
         complete: false, engine: { requested: input.engine ?? 'deterministic', used: 'none', reason: 'conversation_control' }, informationStatus: 'user_reported_unverified' };
     } else {
       // Browser state is deliberately ignored for persistent conversations.
-      response = validateProviderCount(await this.engine.respond({ message: input.message, state, engine: input.engine, syntheticData: true }));
+      response = validateProviderCount(await this.engine.respond(production
+        ? { message: input.message, state, engine: input.engine, productionData: true }
+        : { message: input.message, state, engine: input.engine, syntheticData: true }));
     }
     // SQL rechecks mode, revision, active assignment and lease atomically before saving a reply.
     return this.repository.finish({ ...turn, leaseToken: started.leaseToken, revision: started.conversation.revision, response });

@@ -79,7 +79,9 @@ test('Phase 8A fictional polling persists safe checkpoints, recovers after resta
       instance = make([record('300002', 'STOP', start + 270000)]);
       assert.equal((await instance.poller.poll()).newMessages, 1);
       assert.equal(await count('rc_observations'), 2); assert.equal(await count('rc_optouts'), 1);
-      assert.equal(await count('messages'), 0); assert.equal(await count('staff_assignments'), 0); assert.equal(await count('telegram_notifications'), 0);
+      assert.equal(await count('messages'), 0); assert.equal(await count('staff_assignments'), 0);
+      // The opt-out is the one thing staff are now alerted to (a 'review' alert); nothing else is queued.
+      assert.deepEqual((await db.query('select kind from public.telegram_notifications')).rows.map(r => r.kind), ['review']);
       assert.equal(network, 0);
     });
   } finally {

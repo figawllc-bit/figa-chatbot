@@ -16,6 +16,8 @@ export interface ChatRequest {
   state?: ConversationState;
   engine?: 'deterministic' | 'ai';
   syntheticData?: boolean;
+  /** Set ONLY by server-side channels (never parsed from browser input) for approved real customer data. */
+  productionData?: true;
   conversationId?: string;
   messageId?: string;
 }

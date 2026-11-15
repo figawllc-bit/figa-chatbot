@@ -1,20 +1,22 @@
 import { databaseConfiguration } from './config';
+export type DatabaseConfigurator<E> = (env: E) => { configured: boolean; url?: string; key?: string };
 import type { BeginTurn, ConversationRepository, ConversationSnapshot, DatabaseEnvironment, FinishTurn, TurnInput } from './types';
 import type { ChatResponse } from '../types';
 
 export class DatabaseError extends Error { constructor() { super('Database operation unavailable.'); } }
-export class SupabaseRepository implements ConversationRepository {
-  constructor(private readonly env: DatabaseEnvironment, private readonly transport: typeof fetch = fetch) {}
+export class SupabaseRepository<E extends object = DatabaseEnvironment> implements ConversationRepository {
+  constructor(private readonly env: E, private readonly transport: typeof fetch = fetch,
+    private readonly configure: DatabaseConfigurator<E> = databaseConfiguration as unknown as DatabaseConfigurator<E>) {}
   protected async rpc<T>(name: string, parameters: unknown): Promise<T> {
-    const config = databaseConfiguration(this.env);
-    if (!config.configured) throw new DatabaseError();
+    const config = this.configure(this.env);
+    if (!config.configured || !config.url || !config.key) throw new DatabaseError();
     try {
       // Workers' native fetch requires the global receiver, not this repository.
       const response = await this.transport.call(globalThis, `${config.url}/rest/v1/rpc/${name}`, {
         // Workers supports manual redirects; reject their non-2xx responses below.
         method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(5000),
         // Modern secret keys are not JWTs; never send them as Bearer tokens.
-        headers: { apikey: this.env.SUPABASE_SECRET_KEY!, 'Content-Type': 'application/json' },
+        headers: { apikey: config.key, 'Content-Type': 'application/json' },
         body: JSON.stringify(parameters),
       });
       if (!response.ok) { await response.body?.cancel(); throw new DatabaseError(); }

@@ -17,7 +17,7 @@ export function staffMessage(value: StaffSummary, chat: number, heading='Convers
   if(safe(d.shift,/^(day|night|evening|overnight|morning|afternoon)(?: shift)?$/i)) lines.push(`Shift: ${d.shift}`);
   if(d.availabilityReceived===true) lines.push('Availability details collected; review in the secured conversation system.');
   if(value.urgent===true) lines.push('URGENT: staffing confirmation required.');
-  lines.push('Synthetic development data. No availability or employment is confirmed.');
+  lines.push('Details are user-reported. No availability or employment is confirmed.');
   const button=(text:string,action:string)=>({text,callback_data:`fg:${action}:${value.id}:${value.revision}`});
   // Default deny. These capabilities must come from the authenticated roster RPC.
   const buttons=actions.includes('summary')?[button('View Status','s')]:[];
