@@ -45,6 +45,8 @@ export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
     const controls = pollingControls(this.env);
     if (!RINGCENTRAL_POLLING_LIVE_ENABLED || !controls.enabled || controls.paused || this.env.RINGCENTRAL_MONITORING_SECURITY_APPROVED !== 'true')
       return { status: controls.paused ? 'paused' : 'disabled', newMessages: 0, duplicates: 0, excluded: 0, errors: 0, lastSuccessfulCheck: null };
+    const cleared = this.env.RINGCENTRAL_AUTH_REVIEW_CLEARED;
+    if (cleared) await this.clearAuthReview(cleared);
     // Invalid approval is handled by the existing poller before storage or auth.
     let approval: PollingApproval | undefined;
     try { approval = JSON.parse(this.env.RINGCENTRAL_POLLING_APPROVAL_JSON ?? 'null') ?? undefined; } catch { /* fail closed */ }
@@ -54,6 +56,25 @@ export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
     this.poller ??= new RingCentralIncomingPoller({ mode: 'live', store: new DurablePollingStore(this.ctx), credentials: monitoringCredentials(this.env),
       http: request => fetch(request), controls: () => pollingControls(this.env), approval, ...(sink ? { live: { scope: productionScope(this.env), sink } } : {}) });
     return this.poller.poll();
+  }
+  /**
+   * Clears an authentication-review block once per distinct operator value. Only authBlocked changes;
+   * the baseline, window and seen-message checkpoints are kept, so nothing is re-read or skipped.
+   */
+  async clearAuthReview(value: string): Promise<boolean> {
+    if (!/^[A-Za-z0-9:._-]{1,64}$/.test(value)) return false;
+    return this.ctx.blockConcurrencyWhile(async () => {
+      if ((await this.ctx.storage.get<string>('auth-review-cleared')) === value) return false;
+      const state = await this.ctx.storage.get<PollState>('checkpoint');
+      if (state?.authBlocked) {
+        const next = { ...structuredClone(state), authBlocked: false };
+        validatePollState(next);
+        await this.ctx.storage.put('checkpoint', next);
+      }
+      await this.ctx.storage.put('auth-review-cleared', value);
+      console.info('figa_auth_review_cleared', { wasBlocked: !!state?.authBlocked });
+      return !!state?.authBlocked;
+    });
   }
   /** One Telegram pass: staff commands (getUpdates) then queued staff alerts. No public webhook. */
   async staff(): Promise<StaffPollReport> {

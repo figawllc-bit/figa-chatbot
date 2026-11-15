@@ -10,6 +10,8 @@ export interface MonitoringEnvironment extends PollingEnvironment {
   RINGCENTRAL_CLIENT_SECRET?: string;
   RINGCENTRAL_JWT?: string;
   RINGCENTRAL_POLLING_APPROVAL_JSON?: string;
+  /** Operator action: set to a NEW value (e.g. a date) after reviewing an authentication block; clears it once. */
+  RINGCENTRAL_AUTH_REVIEW_CLEARED?: string;
   RINGCENTRAL_MONITORING_SECURITY_APPROVED?: string;
   /** 'true' when the polling app holds exactly Read Messages + SMS (one app for reading and replying). */
   RINGCENTRAL_APP_HAS_SMS?: string;

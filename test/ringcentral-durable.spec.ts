@@ -163,3 +163,20 @@ describe('Phase 8B durable receive-only monitoring', () => {
     });
   });
 });
+
+describe('operator clearing of an authentication-review block', () => {
+  it('clears authBlocked once per distinct value and keeps every other checkpoint field', async () => {
+    const s = stub();
+    const t = '2026-11-15T12:00:00.000Z';
+    const blocked = { version: 1, baselineAt: t, completedThrough: t, lastAttemptAt: t, lastSuccessfulCheck: t, notBefore: null, authBlocked: true,
+      seen: [{ hash: 'a'.repeat(64), createdAt: t }] };
+    await runInDurableObject(s, async (_i, state) => { await state.storage.put('checkpoint', blocked); await state.storage.delete('auth-review-cleared'); });
+    expect(await s.clearAuthReview('2026-11-15')).toBe(true);
+    const after = await runInDurableObject(s, async (_i, state) => state.storage.get<PollState>('checkpoint'));
+    expect(after).toEqual({ ...blocked, authBlocked: false });
+    await runInDurableObject(s, async (_i, state) => { await state.storage.put('checkpoint', blocked); });
+    expect(await s.clearAuthReview('2026-11-15')).toBe(false); // same value: never clears again
+    expect(await s.clearAuthReview('bad value!')).toBe(false);
+    expect((await runInDurableObject(s, async (_i, state) => state.storage.get<PollState>('checkpoint')))?.authBlocked).toBe(true);
+  });
+});

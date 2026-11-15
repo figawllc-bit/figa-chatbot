@@ -52,7 +52,9 @@
 				// Sending ON (approved). Replies go out only when staff set Away/Auto in Telegram; Paused/On Duty send nothing.
 				"RINGCENTRAL_SMS_SENDING_ENABLED": "true",
 				// One RingCentral app ("FIGA Chatbot Read-Only") holds exactly Read Messages + SMS.
-				"RINGCENTRAL_APP_HAS_SMS": "false",
+				"RINGCENTRAL_APP_HAS_SMS": "true",
+				// One-time operator action: the app gained SMS, which (correctly) blocked the read-only reader; reviewed and cleared.
+				"RINGCENTRAL_AUTH_REVIEW_CLEARED": "2026-11-15-app-gained-sms",
 				"RINGCENTRAL_OFFLINE_ENABLED": "false",
 				"AI_GLOBAL_PAUSED": "false",
 				"AI_ENABLED": "true",
