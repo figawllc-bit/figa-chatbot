@@ -29,7 +29,9 @@ export function monitoringCredentials(env: MonitoringEnvironment): RuntimeCreden
 export async function scheduledStaff(env: MonitoringEnvironment & { TELEGRAM_POLLING_ENABLED?: string }): Promise<void> {
   // Check the switch before touching any binding.
   if (env.TELEGRAM_POLLING_ENABLED !== 'true' || !env.RINGCENTRAL_MONITOR) return;
-  await env.RINGCENTRAL_MONITOR.get(env.RINGCENTRAL_MONITOR.idFromName(KEY)).staff();
+  const report = await env.RINGCENTRAL_MONITOR.get(env.RINGCENTRAL_MONITOR.idFromName(KEY)).staff();
+  // Status and count only: no message text, IDs, tokens or Telegram bodies.
+  console.info('figa_staff_pass', { status: report.status, processed: report.processed });
 }
 export async function scheduledMonitoring(env: MonitoringEnvironment, override?: Pick<RingCentralIncomingPoller, 'poll'>): Promise<void> {
   // No public HTTP route, no alarms, no Cron registration, no retry wrapper.
