@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { RingCentralSmsSender } from '../src/ringcentral/sms-sender';
 import { exchangeSmsJwt, exchangeReadOnlyJwt, type SmsGrant } from '../src/ringcentral/oauth-read-session';
 import { createOfflinePollingHttp, type OfflineHttpStep } from '../src/ringcentral/secure-transport';
-import { smsReplyText, SmsChannelEngine, SMS_MAX_CHARACTERS } from '../src/ringcentral/sms-workflow';
+import { smsReplyText, SmsChannelEngine, SMS_MAX_CHARACTERS, SMS_HELP_REPLY, isHelpKeyword } from '../src/ringcentral/sms-workflow';
 
 const payload = { from: '+15035550100', to: '+15035550110', text: 'Fictional safe response.' };
 const credentials = { kind: 'jwt' as const, clientId: 'fictional-client', clientSecret: 'fictional-secret', jwt: 'fictional.header.signature', accountId: '100001', extensionId: '200001', host: 'https://platform.ringcentral.com' as const, appPermissions: ['ReadMessages', 'SMS'] as const };
@@ -79,5 +79,17 @@ describe('SMS channel reply text', () => {
     const r = await new SmsChannelEngine(inner).respond({ message: 'Fictional provider inquiry' });
     expect(r.assistantResponse).toBe(''); expect(r.humanAttentionNeeded).toBe(true); expect(r.state.humanAttentionReasons).toContain('Reply could not be sent as a single SMS.');
     expect(smsReplyText('y'.repeat(SMS_MAX_CHARACTERS))).toHaveLength(SMS_MAX_CHARACTERS);
+  });
+});
+
+describe('SMS HELP keyword', () => {
+  const inner = () => ({ respond: vi.fn(async () => { throw new Error('engine must not run for HELP'); }) });
+  it.each(['HELP', 'help', ' Info. ', 'HELP!'])('answers %j with the fixed help text, without the engine or AI', async message => {
+    const engine = inner(); const r = await new SmsChannelEngine(engine).respond({ message });
+    expect(r.assistantResponse).toBe(SMS_HELP_REPLY); expect(engine.respond).not.toHaveBeenCalled(); expect(r.engine?.used).toBe('none');
+    expect(SMS_HELP_REPLY.length).toBeLessThanOrEqual(SMS_MAX_CHARACTERS); expect(SMS_HELP_REPLY).toMatch(/Reply STOP to opt out\.$/);
+  });
+  it('a sentence that merely contains "help" goes through the normal engine', async () => {
+    expect(isHelpKeyword('help me find a caregiver job')).toBe(false); expect(isHelpKeyword('HELP')).toBe(true);
   });
 });

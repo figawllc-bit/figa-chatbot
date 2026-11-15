@@ -12,6 +12,7 @@ export const fixtureTexts = Object.freeze([
   'Fictional inquiry on another business line', 'Fictional independent inquiry',
   'Fictional direct RPC invalid batch', 'Fictional staffing inquiry',
   'STOP', 'START', ' stop ', 'STOPALL', 'Unsubscribe', 'CANCEL', 'END', 'QUIT', 'please stop', 'stop please!',
+  'HELP', 'INFO',
 ] as const);
 function reject(): never { throw new InputError('Only authored fictional RingCentral fixtures are accepted.'); }
 export function assertFixtureScope(scope: RingCentralScope): void {

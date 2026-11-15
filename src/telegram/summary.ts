@@ -60,8 +60,9 @@ export function modeMessage(status:{mode:BotMode;effective:EffectiveBotMode;hour
   lines.push('Per-conversation Take Over / Return to AI still apply.');
   const options:[BotMode,string][]=[['auto','Auto (office hours)'],['away','Away (bot answers)'],['on_duty','On Duty (staff answer)'],['paused','Pause all']];
   const buttons=canChange?options.filter(([m])=>m!==mode).map(([m,text])=>({text,callback_data:`fg:m:${m}`})):[];
-  if(canChange) lines.push('Change office hours: /sethours mon-fri 08:00-17:00 (or /sethours none)');
-  else lines.push('You can view the mode but not change it.');
+  if(canChange) lines.push('Commands: /away /onduty /pause /auto /status /inbox /help','Change office hours: /sethours mon-fri 08:00-17:00 (or /sethours none)');
+  else lines.push('Commands: /status /inbox /help');
+  if(!canChange) lines.push('You can view the mode but not change it.');
   // Two buttons per row so the labels stay readable on a phone.
   const rows=[];for(let i=0;i<buttons.length;i+=2) rows.push(buttons.slice(i,i+2));
   return {chat_id:chat,text:lines.join('\n'),protect_content:true,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:rows}};

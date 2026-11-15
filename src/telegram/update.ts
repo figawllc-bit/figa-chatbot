@@ -49,9 +49,9 @@ export function parseTelegramUpdate(raw: unknown): StaffUpdate | null {
   // Global bot mode. /resume is an alias for /away (bot answers again).
   const setHours=message.text.match(/^\/sethours\s+(.+)$/);
   if (setHours) { const hours=parseOfficeHours(setHours[1]); return hours?{...base,action:'hours',hours,conversationId:null,revision:null}:null; }
-  const command=message.text.match(/^\/(status|hours|auto|away|onduty|pause|resume)\s*$/);
+  const command=message.text.match(/^\/(status|help|hours|auto|away|onduty|pause|resume)\s*$/);
   if (command) {
-    const modes:Record<string,BotMode|null>={status:null,hours:null,auto:'auto',away:'away',resume:'away',onduty:'on_duty',pause:'paused'};
+    const modes:Record<string,BotMode|null>={status:null,help:null,hours:null,auto:'auto',away:'away',resume:'away',onduty:'on_duty',pause:'paused'};
     return {...base,action:'mode',mode:modes[command[1]],conversationId:null,revision:null};
   }
   const match=message.text.match(/^\/summary ([a-f0-9-]{36})\s*$/);

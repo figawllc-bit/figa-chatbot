@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('wrangler'))('esbuild');
 const outfile = resolve('.wrangler/sms-workflow-offline.mjs');
-await build({ stdin: { contents: `export {SyntheticSmsWorkflow,SmsWorkflowRepository} from './src/ringcentral/sms-workflow'; export {RingCentralSmsSender,RINGCENTRAL_SMS_DELIVERY_ENABLED} from './src/ringcentral/sms-sender'; export {exchangeSmsJwt} from './src/ringcentral/oauth-read-session'; export {createOfflinePollingHttp} from './src/ringcentral/secure-transport'; export {createOfflineCredentials} from './src/ringcentral/offline-credentials'; export {RingCentralIncomingPoller} from './src/ringcentral/polling'; export {HybridEngine} from './src/ai/engine'; export {adaptRingCentral} from './src/ringcentral/events'; export {scope,message,instant} from './test/fixtures/ringcentral'; export {StaffBot} from './src/telegram/bot'; export {SupabaseStaffRepository} from './src/telegram/repository'; export {SimulatedTelegramTransport} from './src/telegram/transport';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile, logLevel: 'silent' });
+await build({ stdin: { contents: `export {SyntheticSmsWorkflow,SmsWorkflowRepository,SMS_HELP_REPLY} from './src/ringcentral/sms-workflow'; export {RingCentralSmsSender,RINGCENTRAL_SMS_DELIVERY_ENABLED} from './src/ringcentral/sms-sender'; export {exchangeSmsJwt} from './src/ringcentral/oauth-read-session'; export {createOfflinePollingHttp} from './src/ringcentral/secure-transport'; export {createOfflineCredentials} from './src/ringcentral/offline-credentials'; export {RingCentralIncomingPoller} from './src/ringcentral/polling'; export {HybridEngine} from './src/ai/engine'; export {adaptRingCentral} from './src/ringcentral/events'; export {scope,message,instant} from './test/fixtures/ringcentral'; export {StaffBot} from './src/telegram/bot'; export {SupabaseStaffRepository} from './src/telegram/repository'; export {SimulatedTelegramTransport} from './src/telegram/transport';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile, logLevel: 'silent' });
 const app = await import(pathToFileURL(outfile).href);
 const provider = 'My name is Alex Example. I need three caregivers for a group home in Salem, Oregon, starting tonight on the night shift. This is urgent.';
 const caregiver = 'My name is Sam Example. I am seeking a CNA job in Portland, Oregon. I have three years of caregiving experience, can work Monday through Friday, and prefer evening shifts.';
@@ -260,6 +260,13 @@ test('SMS detection to persisted Gemma intake and guarded SMS POST, fictional on
    // Pause still overrides everything, including Auto.
    assert.equal(await say(manager,'/pause'),'applied');assert.equal(await eff('2026-11-16T17:30:00Z'),'paused');
    await db.query("update public.figa_bot_mode set mode='away'");
+  });
+  await t.test('HELP gets exactly one fixed help reply with no AI, stored as sent',async()=>{
+   const m=observe('HELP','+15035550182'),out=sender(),before=models;
+   await new app.SyntheticSmsWorkflow(repo,engine(),out.s,()=>controls).process(m);
+   assert.equal(models,before);assert.equal(await status(m),'accepted');assert.equal(out.http.audit().filter(x=>x.path.endsWith('/sms')).length,1);
+   const text=(await db.query("select m.response->>'assistantResponse' as t from public.rc_sms_jobs j join public.messages m on m.client_message_id=j.client_message_id and m.direction='inbound' where j.inbound_id=$1",[m.id])).rows[0].t;
+   assert.equal(text,app.SMS_HELP_REPLY);
   });
   await t.test('unapproved real-like material and live sender cannot touch credentials or network',async()=>{
    const m=observe();await assert.rejects(new app.SyntheticSmsWorkflow(repo,engine(),sender().s,()=>controls).process({...m,text:'unapproved customer material'}));

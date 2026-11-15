@@ -76,7 +76,7 @@ All production code is written and tested offline; nothing real runs until the r
 1. Keep `FIGA Chatbot Read-Only` (ReadMessages) unchanged for polling.
 2. Create a separate app, e.g. "FIGA Chatbot SMS", with JWT auth and exactly **SMS + ReadMessages** permissions. `exchangeSmsJwt` rejects any other scope set.
 3. Authorize that app's JWT as the extension 101 user (owner `3322425015`).
-4. Choose the sending number. It must be SMS-enabled with the **SmsSender** feature on extension 101, and registered: a TCR/10DLC campaign for a local long code, or toll-free verification for a toll-free number. RingCentral blocks unregistered A2P traffic. Start this early; approval can take days to weeks.
+4. Choose the sending number. It must be SMS-enabled with the **SmsSender** feature on extension 101, and registered: a TCR/10DLC campaign for a local long code, or toll-free verification for a toll-free number. RingCentral blocks unregistered A2P traffic. Start this early; approval can take days to weeks. Form texts and sample messages: [SMS_REGISTRATION.md](SMS_REGISTRATION.md). The bot answers HELP/INFO automatically.
 5. Note the numeric RingCentral account ID (it appears in message-store URIs).
 6. Extension 102 stays out of scope until separately authorized.
 

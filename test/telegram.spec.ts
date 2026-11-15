@@ -194,3 +194,12 @@ describe('Telegram office hours (/auto, /sethours)',()=>{
     expect(await f.bot.notify(10001,10001)).toBe(1);expect(f.transport.messages[0].text).toMatch(/^Bot stopped on this conversation: someone replied to the customer by hand/);
   });
 });
+
+describe('Telegram /help',()=>{
+  it('is a status request that lists the commands for the staff member',async()=>{
+    const msg={update_id:12,message:{from:{id:10001,is_bot:false},chat:{id:10001,type:'private'},text:'/help'}};
+    expect(parseTelegramUpdate(msg)).toMatchObject({action:'mode',mode:null});
+    expect(modeMessage({mode:'auto',effective:'away',hours:{}},1,true).text).toMatch(/Commands: \/away \/onduty \/pause \/auto \/status \/inbox \/help/);
+    expect(modeMessage({mode:'auto',effective:'away'},1,false).text).toMatch(/Commands: \/status \/inbox \/help/);
+  });
+});
