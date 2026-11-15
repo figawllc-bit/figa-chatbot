@@ -1,7 +1,12 @@
-export type StaffAction = 'inbox' | 'summary' | 'takeover' | 'resolve' | 'return_ai';
+export type StaffAction = 'inbox' | 'summary' | 'takeover' | 'resolve' | 'return_ai' | 'mode';
+// Global bot mode: away = bot answers; on_duty = staff answer; paused = bot fully off.
+export type BotMode = 'away' | 'on_duty' | 'paused';
+export type BotModeResult = { kind: 'ok' | 'applied' | 'denied' | 'duplicate' | 'conflict'; mode?: BotMode; canChange?: boolean };
 export interface StaffUpdate {
   updateId: number; actor: number; chat: number; action: StaffAction;
   conversationId: string | null; revision: number | null; callbackId?: string;
+  /** Only for action 'mode': the requested mode, or null for status only. */
+  mode?: BotMode | null;
 }
 export interface StaffSummary {
   id: string; type: 'unknown' | 'provider' | 'caregiver' | 'general';
@@ -12,7 +17,7 @@ export interface StaffControls { actions:StaffAction[]; summary:StaffSummary }
 export interface ControlledStaffScope { actor:number; conversationId:string }
 export type StaffResult = { kind: 'ok' | 'applied' | 'denied' | 'stale' | 'unavailable' | 'duplicate' | 'conflict'; conversations?: StaffSummary[] };
 export interface NotificationClaim { id: string; leaseToken: string }
-export interface StaffNotification { id: string; kind: 'provider' | 'caregiver' | 'urgent' | 'status'; conversation: StaffSummary }
+export interface StaffNotification { id: string; kind: 'provider' | 'caregiver' | 'urgent' | 'status' | 'message'; conversation: StaffSummary }
 export interface NotificationPreview extends StaffNotification { deliveryState:'pending'|'leased'|'delivered' }
 export interface StaffRepository {
   controls(actor:number,chat:number,id:string,revision:number|null):Promise<StaffControls|null>;
@@ -22,6 +27,7 @@ export interface StaffRepository {
   pending(actor: number, chat: number): Promise<{ kind: 'ok' | 'denied'; notifications?: NotificationClaim[] }>;
   notification(actor: number, chat: number, claim: NotificationClaim): Promise<StaffNotification | null>;
   acknowledge(actor: number, chat: number, claim: NotificationClaim): Promise<boolean>;
+  mode(update: StaffUpdate, requestHash: string): Promise<BotModeResult>;
 }
 export interface TelegramMessage {
   chat_id: number; text: string;

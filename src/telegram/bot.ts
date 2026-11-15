@@ -1,9 +1,9 @@
 import { digest } from '../database/service';
 import { parseTelegramUpdate } from './update';
-import { staffMessage } from './summary';
-import type { ControlledStaffScope, StaffRepository, TelegramTransport } from './types';
+import { modeMessage, staffMessage } from './summary';
+import type { ControlledStaffScope, StaffRepository, StaffUpdate, TelegramTransport } from './types';
 
-const headings={provider:'New provider request',caregiver:'New caregiver inquiry',urgent:'Urgent staffing alert',status:'Conversation status update'};
+const headings={provider:'New provider request',caregiver:'New caregiver inquiry',urgent:'Urgent staffing alert',status:'Conversation status update',message:'New text received - bot is not answering (On Duty or Paused). Reply from RingCentral.'};
 export class StaffBot {
   constructor(private readonly repository:StaffRepository,private readonly transport:TelegramTransport) {}
   async dispatch():Promise<number> {
@@ -20,6 +20,7 @@ export class StaffBot {
       if(u.action==='inbox')u={...u,action:'summary',conversationId:scope.conversationId,revision:null};
       else if(u.conversationId!==scope.conversationId)return 'ignored';
     }
+    if(u.action==='mode') return scope ? 'ignored' : this.mode(u); // Global switch: never from a single-conversation test scope.
     const result=await this.repository.process(u,await digest(JSON.stringify(u)));
     if(!['ok','applied','denied','stale','unavailable','duplicate','conflict'].includes(result.kind)) throw new Error('Invalid staff action result.');
     if(u.callbackId) {
@@ -38,6 +39,24 @@ export class StaffBot {
       const controls=await this.repository.controls(u.actor,u.chat,scope.conversationId,null);
       if(controls)await this.transport.send(staffMessage(controls.summary,u.chat,'Conversation status',controls.actions));
     } else if(!scope && (result.kind==='applied' || result.kind==='duplicate')) await this.notify(u.actor,u.chat);
+    return result.kind;
+  }
+  private async mode(u:StaffUpdate):Promise<string> {
+    const result=await this.repository.mode(u,await digest(JSON.stringify(u)));
+    if(!['ok','applied','denied','duplicate','conflict'].includes(result.kind)) throw new Error('Invalid bot mode result.');
+    if(u.callbackId) {
+      const text={ok:'Mode unchanged.',applied:'Bot mode updated.',denied:'Access denied.',duplicate:'Update already processed.',conflict:'Update rejected.'}[result.kind];
+      try { await this.transport.answer(u.callbackId,text); } catch { /* No sensitive error logging. */ }
+    }
+    if(result.kind==='denied'||result.kind==='conflict'||!result.mode) return result.kind;
+    if(result.kind==='applied') {
+      // Everyone on the roster learns the bot was switched; each gets buttons only if permitted.
+      for(const r of await this.repository.recipients()) {
+        const own=r.actor===u.actor;
+        try { await this.transport.send(modeMessage(result.mode,r.chat,own?result.canChange===true:false,own?'Bot mode changed':'Bot mode changed by a staff member')); }
+        catch(error) { if(own) throw error; }
+      }
+    } else await this.transport.send(modeMessage(result.mode,u.chat,result.canChange===true));
     return result.kind;
   }
   async notify(actor:number,chat:number):Promise<number> {

@@ -1,5 +1,5 @@
 import { isUUID } from '../validation';
-import type { StaffAction, StaffUpdate } from './types';
+import type { BotMode, StaffAction, StaffUpdate } from './types';
 
 export const record = (v: unknown): Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
 const telegramId = (v: unknown): v is number => Number.isSafeInteger(v) && Number(v) > 0 && Number(v) <= 4503599627370495;
@@ -16,6 +16,8 @@ export function parseTelegramUpdate(raw: unknown): StaffUpdate | null {
   const base={updateId:Number(update.update_id),actor:actor.id,chat:actor.id};
   if (update.callback_query) {
     if (typeof callback.id!=='string' || !/^[A-Za-z0-9_-]{1,128}$/.test(callback.id) || typeof callback.data!=='string') return null;
+    const modeButton=callback.data.match(/^fg:m:(away|on_duty|paused)$/);
+    if (modeButton) return {...base,callbackId:callback.id,action:'mode',mode:modeButton[1] as BotMode,conversationId:null,revision:null};
     const match=callback.data.match(/^fg:([tsra]):([a-f0-9-]{36}):([0-9]{1,10})$/);
     if (!match || !isUUID(match[2]) || Number(match[3])>2147483647) return null;
     const actions:Record<string,StaffAction>={t:'takeover',s:'summary',r:'resolve',a:'return_ai'};
@@ -23,6 +25,12 @@ export function parseTelegramUpdate(raw: unknown): StaffUpdate | null {
   }
   if (typeof message.text!=='string' || message.text.length>100) return null;
   if (/^\/(start|inbox)\s*$/.test(message.text)) return {...base,action:'inbox',conversationId:null,revision:null};
+  // Global bot mode. /resume is an alias for /away (bot answers again).
+  const command=message.text.match(/^\/(status|away|onduty|pause|resume)\s*$/);
+  if (command) {
+    const modes:Record<string,BotMode|null>={status:null,away:'away',resume:'away',onduty:'on_duty',pause:'paused'};
+    return {...base,action:'mode',mode:modes[command[1]],conversationId:null,revision:null};
+  }
   const match=message.text.match(/^\/summary ([a-f0-9-]{36})\s*$/);
   return match && isUUID(match[1]) ? {...base,action:'summary',conversationId:match[1],revision:null} : null;
 }

@@ -2,7 +2,7 @@ import { describe,expect,it,vi } from 'vitest';
 import worker from '../src/index';
 import { StaffBot } from '../src/telegram/bot';
 import { parseTelegramUpdate } from '../src/telegram/update';
-import { staffMessage } from '../src/telegram/summary';
+import { modeMessage, staffMessage } from '../src/telegram/summary';
 import { SimulatedTelegramTransport,BotAPITransport,TelegramTransportError } from '../src/telegram/transport';
 import { telegramWebhook,TelegramPoller } from '../src/telegram/ingress';
 import type { StaffRepository,StaffSummary } from '../src/telegram/types';
@@ -20,6 +20,7 @@ function fixture() {
     pending:vi.fn<StaffRepository['pending']>().mockResolvedValue({kind:'ok',notifications:[{id,leaseToken:id}]}),
     notification:vi.fn<StaffRepository['notification']>().mockResolvedValue({id,kind:'urgent',conversation:summary()}),
     acknowledge:vi.fn<StaffRepository['acknowledge']>().mockResolvedValue(true),
+    mode:vi.fn<StaffRepository['mode']>().mockResolvedValue({kind:'ok',mode:'paused',canChange:true}),
   };
   const transport=new SimulatedTelegramTransport();return {repository,transport,bot:new StaffBot(repository,transport)};
 }
@@ -126,5 +127,36 @@ describe('Official Bot API adapter remains opt in',()=>{
   it.each([302,401,429,500])('does not retry or leak token-bearing upstream errors on HTTP %s',async status=>{
     const transport=vi.fn<typeof fetch>().mockResolvedValue(new Response('private token text',{status}));
     await expect(new BotAPITransport({TELEGRAM_STAFF_ENABLED:'true',TELEGRAM_LIVE_ENABLED:'true',TELEGRAM_BOT_TOKEN:token},transport).updates(0)).rejects.toThrow('Telegram operation unavailable.');expect(transport).toHaveBeenCalledOnce();
+  });
+});
+
+describe('Telegram global bot mode (Away / On Duty / Pause all)',()=>{
+  const text=(t:string,actor=10001)=>({update_id:9,message:{from:{id:actor,is_bot:false},chat:{id:actor,type:'private'},text:t}});
+  it.each([['/status',null],['/away','away'],['/resume','away'],['/onduty','on_duty'],['/pause','paused']] as const)('parses %s',(command,mode)=>{
+    expect(parseTelegramUpdate(text(command))).toMatchObject({action:'mode',mode,conversationId:null,revision:null});
+  });
+  it('parses mode buttons and rejects unknown modes',()=>{
+    expect(parseTelegramUpdate(callback(10001,'fg:m:paused'))).toMatchObject({action:'mode',mode:'paused',callbackId:'abc123'});
+    expect(parseTelegramUpdate(callback(10001,'fg:m:everything'))).toBeNull();
+    expect(parseTelegramUpdate(text('/pause now'))).toBeNull();
+  });
+  it('a change is announced to every roster member; only the changer gets buttons',async()=>{
+    const f=fixture();f.repository.mode.mockResolvedValue({kind:'applied',mode:'on_duty',canChange:true});
+    f.repository.recipients.mockResolvedValue([{actor:10001,chat:10001},{actor:10002,chat:10002}]);
+    expect(await f.bot.handle(text('/onduty'))).toBe('applied');
+    expect(f.repository.mode).toHaveBeenCalledWith(expect.objectContaining({mode:'on_duty',actor:10001}),expect.stringMatching(/^[a-f0-9]{64}$/));
+    expect(f.repository.process).not.toHaveBeenCalled();
+    const [mine,theirs]=f.transport.messages;
+    expect(mine.chat_id).toBe(10001);expect(mine.text).toMatch(/ON DUTY/);expect(mine.reply_markup.inline_keyboard[0].map(b=>b.callback_data)).toEqual(['fg:m:away','fg:m:paused']);
+    expect(theirs.chat_id).toBe(10002);expect(theirs.text).toMatch(/by a staff member/);expect(theirs.reply_markup.inline_keyboard).toEqual([]);
+  });
+  it('denied changes send nothing, and a single-conversation test scope can never switch the global mode',async()=>{
+    const f=fixture();f.repository.mode.mockResolvedValue({kind:'denied'});
+    expect(await f.bot.handle(text('/pause'))).toBe('denied');expect(f.transport.messages).toHaveLength(0);
+    expect(await f.bot.handle(text('/pause'),{actor:10001,conversationId:id})).toBe('ignored');expect(f.repository.mode).toHaveBeenCalledTimes(1);
+  });
+  it('view-only status has no buttons',()=>{
+    expect(modeMessage('paused',1,false).reply_markup.inline_keyboard).toEqual([]);
+    expect(modeMessage('paused',1,true).text).toMatch(/PAUSED - the bot is off/);
   });
 });

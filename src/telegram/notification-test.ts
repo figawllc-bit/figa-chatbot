@@ -21,7 +21,7 @@ export function notificationTestOptions(args:string[]):NotificationTestOptions {
 export function notificationTestMessage(notification:import('./types').StaffNotification) {
   if(!['provider','caregiver','urgent','status'].includes(notification.kind))throw new Error('Invalid notification.');
   const headings={provider:'New provider request',caregiver:'New caregiver inquiry',urgent:'Urgent staffing alert',status:'Conversation status update'};
-  const message=staffMessage(notification.conversation,CONNECTION_TEST_USER,headings[notification.kind]);
+  const message=staffMessage(notification.conversation,CONNECTION_TEST_USER,headings[notification.kind as keyof typeof headings]);
   // This recipient is view-only. No takeover, resolve, or return buttons are exposed.
   message.reply_markup={inline_keyboard:[]};
   return message;

@@ -1,7 +1,7 @@
 import { hasSensitiveInput } from '../safety';
 import { isUUID } from '../validation';
 import { record } from './update';
-import type { StaffAction, StaffSummary, TelegramMessage } from './types';
+import type { BotMode, StaffAction, StaffSummary, TelegramMessage } from './types';
 
 // Deliberately exclude names, organizations, notes, experience and message bodies.
 export function staffMessage(value: StaffSummary, chat: number, heading='Conversation summary',actions:readonly StaffAction[]=[]): TelegramMessage {
@@ -28,5 +28,20 @@ export function staffMessage(value: StaffSummary, chat: number, heading='Convers
       if(actions.includes('return_ai'))buttons.push(button('Return to AI','a'));
     }
   }
+  return {chat_id:chat,text:lines.join('\n'),protect_content:true,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:buttons.length?[buttons]:[]}};
+}
+
+const modeText:Record<BotMode,string>={
+  away:'AWAY - the bot is answering caregiver and provider texts automatically.',
+  on_duty:'ON DUTY - staff are answering. The bot stays silent and alerts you to each new text.',
+  paused:'PAUSED - the bot is off. It will not reply to or send any text.',
+};
+/** Global bot mode status. Buttons are shown only to staff allowed to change it. */
+export function modeMessage(mode: BotMode, chat: number, canChange: boolean, heading='Bot mode'): TelegramMessage {
+  if (!(mode in modeText)) throw new Error('Invalid bot mode.');
+  const lines=[heading,modeText[mode],'Per-conversation Take Over / Return to AI still apply.'];
+  const options:[BotMode,string][]=[['away','Away (bot answers)'],['on_duty','On Duty (staff answer)'],['paused','Pause all']];
+  const buttons=canChange?options.filter(([m])=>m!==mode).map(([m,text])=>({text,callback_data:`fg:m:${m}`})):[];
+  if(!canChange) lines.push('You can view the mode but not change it.');
   return {chat_id:chat,text:lines.join('\n'),protect_content:true,link_preview_options:{is_disabled:true},reply_markup:{inline_keyboard:buttons.length?[buttons]:[]}};
 }

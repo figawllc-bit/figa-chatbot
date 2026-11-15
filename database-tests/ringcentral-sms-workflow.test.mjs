@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const { build } = createRequire(require.resolve('wrangler'))('esbuild');
 const outfile = resolve('.wrangler/sms-workflow-offline.mjs');
-await build({ stdin: { contents: `export {SyntheticSmsWorkflow,SmsWorkflowRepository} from './src/ringcentral/sms-workflow'; export {RingCentralSmsSender,RINGCENTRAL_SMS_DELIVERY_ENABLED} from './src/ringcentral/sms-sender'; export {exchangeSmsJwt} from './src/ringcentral/oauth-read-session'; export {createOfflinePollingHttp} from './src/ringcentral/secure-transport'; export {createOfflineCredentials} from './src/ringcentral/offline-credentials'; export {RingCentralIncomingPoller} from './src/ringcentral/polling'; export {HybridEngine} from './src/ai/engine'; export {adaptRingCentral} from './src/ringcentral/events'; export {scope,message,instant} from './test/fixtures/ringcentral';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile, logLevel: 'silent' });
+await build({ stdin: { contents: `export {SyntheticSmsWorkflow,SmsWorkflowRepository} from './src/ringcentral/sms-workflow'; export {RingCentralSmsSender,RINGCENTRAL_SMS_DELIVERY_ENABLED} from './src/ringcentral/sms-sender'; export {exchangeSmsJwt} from './src/ringcentral/oauth-read-session'; export {createOfflinePollingHttp} from './src/ringcentral/secure-transport'; export {createOfflineCredentials} from './src/ringcentral/offline-credentials'; export {RingCentralIncomingPoller} from './src/ringcentral/polling'; export {HybridEngine} from './src/ai/engine'; export {adaptRingCentral} from './src/ringcentral/events'; export {scope,message,instant} from './test/fixtures/ringcentral'; export {StaffBot} from './src/telegram/bot'; export {SupabaseStaffRepository} from './src/telegram/repository'; export {SimulatedTelegramTransport} from './src/telegram/transport';`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, platform: 'node', format: 'esm', packages: 'external', outfile, logLevel: 'silent' });
 const app = await import(pathToFileURL(outfile).href);
 const provider = 'My name is Alex Example. I need three caregivers for a group home in Salem, Oregon, starting tonight on the night shift. This is urgent.';
 const caregiver = 'My name is Sam Example. I am seeking a CNA job in Portland, Oregon. I have three years of caregiving experience, can work Monday through Friday, and prefer evening shifts.';
@@ -33,6 +33,9 @@ test('SMS detection to persisted Gemma intake and guarded SMS POST, fictional on
    }
   }
   const repo=new LocalRepo();
+  // A fresh database starts with the bot PAUSED; nothing is ever sent by default.
+  assert.equal((await db.query('select mode from public.figa_bot_mode')).rows[0].mode,'paused');
+  await db.query("update public.figa_bot_mode set mode='away'");
   const observe=(text=provider,customer='+15035550110')=>app.adaptRingCentral(app.instant(app.message(String(310000+(++seq)),'Inbound',text,customer),'sms-event-'+seq),app.scope).messages[0];
   const engine=(hook)=>new app.HybridEngine({AI_ENABLED:'true',AI_PROVIDER:'workers-ai',AI_ALLOW_SYNTHETIC_REQUESTS:'true',AI_FREE_TIER_CONFIRMED:'true',AI:{run:async(model,input)=>{
    models++;assert.equal(model,'@cf/google/gemma-4-26b-a4b-it');assert.match(input.messages[0].content,/FIGA/);
@@ -151,6 +154,52 @@ test('SMS detection to persisted Gemma intake and guarded SMS POST, fictional on
    assert.equal(await status(m),'accepted');assert.equal(out.http.audit().filter(x=>x.path.endsWith('/sms')).length,1);
    const text=(await db.query("select m.response->>'assistantResponse' as t from public.rc_sms_jobs j join public.messages m on m.client_message_id=j.client_message_id and m.direction='inbound' where j.inbound_id=$1",[m.id])).rows[0].t;
    assert.ok(text.length>0&&text.length<=1000);assert.doesNotMatch(text,/Workers AI|deterministic engine|free-tier|no notification has been sent|synthetic/i);
+  });
+  await t.test('Telegram bot mode: /onduty and /pause silence the bot and alert staff, /away resumes, never answering staff-period texts',async()=>{
+   class StaffRepo extends app.SupabaseStaffRepository {rpc(name,params){const op=queue.then(async()=>{await db.exec('set role service_role');try{const values=Object.values(params).map(v=>v&&typeof v==='object'?JSON.stringify(v):v);return (await db.query(`select public.${name}(${values.map((_,i)=>'$'+(i+1)).join(',')}) as result`,values)).rows[0].result;}finally{await db.exec('reset role');}});queue=op.catch(()=>{});return op;}}
+   const transport=new app.SimulatedTelegramTransport(),bot=new app.StaffBot(new StaffRepo({}),transport);
+   const addStaff=async permissions=>{const id=(await db.query('insert into auth.users(id) values(gen_random_uuid()) returning id')).rows[0].id,actor=7646340000+(++seq);
+    await db.query('insert into public.staff_roster(staff_user_id,telegram_user_id,telegram_chat_id,active,permissions,verified_at,verified_by) values($1,$2,$2,true,$3,now(),$1)',[id,actor,permissions]);return actor;};
+   const manager=await addStaff(['view','takeover','resolve','return_ai','bot_mode']),viewer=await addStaff(['view']);
+   const say=(actor,text,update=++seq)=>bot.handle({update_id:update,message:{from:{id:actor,is_bot:false},chat:{id:actor,type:'private'},text}});
+   const mode=async()=>(await db.query('select mode from public.figa_bot_mode')).rows[0].mode;
+   const alerts=async conv=>Number((await db.query("select count(*) from public.telegram_notifications where conversation_id=$1 and kind='message'",[conv])).rows[0].count);
+   const conversationOf=async m=>(await db.query('select conversation_id from public.rc_sms_jobs where inbound_id=$1',[m.id])).rows[0].conversation_id;
+   // View-only staff can see the mode but cannot switch it.
+   assert.equal(await say(viewer,'/status'),'ok');assert.match(transport.messages.at(-1).text,/AWAY/);assert.equal(transport.messages.at(-1).reply_markup.inline_keyboard.length,0);
+   assert.equal(await say(viewer,'/pause'),'denied');assert.equal(await mode(),'away');
+   // ON DUTY: every new text is silenced and alerted to staff, never answered later.
+   const replay=++seq,mark=transport.messages.length;assert.equal(await say(manager,'/onduty',replay),'applied');assert.equal(await mode(),'on_duty');
+   // Every roster member is told; only the person who switched it gets buttons.
+   const sent=transport.messages.slice(mark);
+   assert.equal(sent.filter(m=>m.chat_id===manager&&m.text.startsWith('Bot mode changed\n')).length,1);
+   assert.ok(sent.some(m=>m.chat_id===viewer));
+   assert.ok(sent.filter(m=>m.chat_id!==manager).every(m=>m.text.startsWith('Bot mode changed by a staff member')&&m.reply_markup.inline_keyboard.length===0));
+   assert.equal(await say(manager,'/onduty',replay),'duplicate');assert.equal(await mode(),'on_duty');
+   const customer='+15035550177',a=observe(provider,customer),b=observe('Fictional staffing inquiry',customer),out=sender(),before=models;
+   const flow=new app.SyntheticSmsWorkflow(repo,engine(),out.s,()=>controls);
+   await flow.process(a);await flow.process(b);
+   assert.equal(models,before);assert.equal(out.http.audit().length,0);assert.equal(await status(a),'suppressed');assert.equal(await status(b),'suppressed');
+   const conv=await conversationOf(a);assert.equal(await alerts(conv),2);
+   const queued=(await db.query("select count(*) from public.telegram_notifications n where n.conversation_id=$1 and n.kind='message'",[conv])).rows[0].count;assert.equal(Number(queued),2);
+   const beforeAlerts=transport.messages.length;for(let i=0;i<10&&await bot.notify(manager,manager)>0;i++);
+   const delivered=transport.messages.slice(beforeAlerts).filter(m=>m.chat_id===manager&&m.text.startsWith('New text received')&&m.text.includes(conv));
+   assert.equal(delivered.length,2);assert.ok(delivered.every(m=>m.reply_markup.inline_keyboard.flat().some(x=>x.text==='Take Over')));
+   assert.ok(transport.messages.every(m=>!m.text.includes(customer)&&!m.text.includes('Alex Example')),'no phone numbers or names in Telegram');
+   // AWAY via a button: the bot answers new texts, but never the On Duty ones.
+   assert.equal(await bot.handle({update_id:++seq,callback_query:{id:'cb'+seq,from:{id:manager,is_bot:false},message:{chat:{id:manager,type:'private'}},data:'fg:m:away'}}),'applied');assert.equal(await mode(),'away');
+   await flow.drain();assert.equal(models,before);assert.equal(out.http.audit().length,0);
+   const c=observe('Fictional provider inquiry',customer),out2=sender();await new app.SyntheticSmsWorkflow(repo,engine(),out2.s,()=>controls).process(c);
+   assert.equal(await status(c),'accepted');assert.equal(out2.http.audit().filter(x=>x.path.endsWith('/sms')).length,1);
+   // PAUSE: blocks an already-generated reply, and also a reply whose send is in progress.
+   const d=observe(provider,'+15035550178'),out3=sender();controls.sendingEnabled=false;await new app.SyntheticSmsWorkflow(repo,engine(),out3.s,()=>controls).process(d);assert.equal(await status(d),'generated');
+   assert.equal(await say(manager,'/pause'),'applied');controls.sendingEnabled=true;
+   await new app.SyntheticSmsWorkflow(repo,engine(),out3.s,()=>controls).drain();assert.equal(await status(d),'generated');assert.equal(out3.http.audit().length,0);
+   assert.equal(await say(manager,'/resume'),'applied');
+   const pauseDuringSend=sender({},async()=>{await db.query("update public.figa_bot_mode set mode='paused'");});
+   await new app.SyntheticSmsWorkflow(repo,engine(),pauseDuringSend.s,()=>controls).drain();
+   assert.equal(await status(d),'suppressed');assert.equal(pauseDuringSend.http.audit().filter(x=>x.path.endsWith('/sms')).length,0);
+   await db.query("update public.figa_bot_mode set mode='away'");
   });
   await t.test('unapproved real-like material and live sender cannot touch credentials or network',async()=>{
    const m=observe();await assert.rejects(new app.SyntheticSmsWorkflow(repo,engine(),sender().s,()=>controls).process({...m,text:'unapproved customer material'}));

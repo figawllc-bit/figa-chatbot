@@ -20,6 +20,26 @@ The separate `exchangeSmsJwt` reuses the existing bounded JWT exchange and accep
 - **SMS-safe reply text.** `SmsChannelEngine` (in `src/ringcentral/sms-workflow.ts`) wraps the existing engine for the SMS channel. It strips developer diagnostics such as "Workers AI free quota is exhausted. The local deterministic engine handled this message." and rewords the "no notification has been sent" review notice truthfully. A reply over RingCentral's 1000-character limit goes to staff review and is never truncated. The stored transcript equals the text that would be sent.
 - **New end-to-end coverage**, using the real Telegram staff RPC `figa_telegram_process`: an escalation queues Telegram notifications, Take Over suppresses inference and sending, Return to AI does not answer stale messages, and a later SMS on the same thread receives prior history and keeps collected intake. A Gemma outage still produces exactly one clean SMS.
 
+## Staff control from Telegram (global bot mode)
+
+Migration `20261115000300_bot_mode.sql` (pending, offline only) adds one global mode that approved staff switch from Telegram:
+
+| Command / button | Mode | What the bot does |
+|---|---|---|
+| `/away` or `/resume` | **Away** | Staff unavailable: the bot answers caregiver and provider texts automatically. |
+| `/onduty` | **On Duty** | Staff are answering: the bot stays silent and sends a Telegram alert, with a Take Over button, for each new text. |
+| `/pause` | **Paused** | Everything off: no reply is generated or sent, and staff still get an alert for each text. |
+| `/status` | (any) | Shows the current mode, with buttons if you may change it. |
+
+- A fresh database starts **Paused**.
+- Changing the mode needs the new roster permission `bot_mode`; `view` can only see the status. Every change is announced to all rostered staff.
+- The mode is part of the single SQL gate checked before inference, when a reply is claimed, and again immediately before the SMS POST. Pausing therefore also stops a reply that was already generated or is in the middle of sending.
+- Texts received while On Duty or Paused are never answered later, after switching back to Away.
+- Per-conversation **Take Over / Return to AI / Resolve** work unchanged on top of this.
+- The Cloudflare variables `AI_GLOBAL_PAUSED` and `RINGCENTRAL_POLLING_PAUSED` remain a second emergency stop.
+
+Not built yet: automatic office-hours switching, and detecting replies staff send by hand from the RingCentral app (only incoming texts are polled). Use **On Duty** while staff are answering by hand.
+
 ## Activation is still blocked
 
 The deployed bootstrap remains unchanged and disabled. `RINGCENTRAL_SMS_DELIVERY_ENABLED` and `RINGCENTRAL_POLLING_LIVE_ENABLED` are source constants set to `false`. No env var or secret can override them. No sending scope, credentials, Cron, public route or coworker configuration was changed.
@@ -33,6 +53,7 @@ The deployed bootstrap remains unchanged and disabled. `RINGCENTRAL_SMS_DELIVERY
 2. Approve retention for message content and intake fields.
 3. Telegram is not a BAA-covered service. Staff summaries today contain only type, status, city/state, position, count, date, shift, an availability flag and urgency (no names, phone numbers or message text). Confirm that is acceptable, or reduce it further.
 4. **Rotate the Telegram bot token** (possibly exposed in an earlier screenshot) before any production use.
+5. Apply the pending migrations to the approved database, grant `bot_mode` only to the staff who should switch the bot, and switch to Away from Telegram only when ready.
 
 **B. RingCentral (no changes made; each needs your approval)**
 1. Keep `FIGA Chatbot Read-Only` (ReadMessages) unchanged for polling.
