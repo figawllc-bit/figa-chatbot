@@ -18,6 +18,7 @@ import type { RingCentralEnvironment } from './ringcentral/policy';
 import { RingCentralEventError } from './ringcentral/events';
 import { type RingCentralIncomingPoller } from './ringcentral/polling';
 import { scheduledMonitoring, scheduledStaff, type MonitoringEnvironment } from './ringcentral/polling-runtime';
+import { productionStaffBot, type ProductionEnvironment } from './production/runtime';
 const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers });
 async function readJSON(request: Request, limit = 32768): Promise<unknown> {
@@ -51,6 +52,8 @@ export function createWorker(repositoryOverride?: ConversationRepository, ringCe
     const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
     const config = aiConfiguration(env);
     const dbConfig = databaseConfiguration(env);
+    // Production: the public workers.dev address answers ONLY the secret-protected Telegram webhook.
+    if ((env as ProductionEnvironment).FIGA_PUBLIC_WEBHOOK_ONLY === 'true' && path !== '/telegram/webhook') return json({ error: 'Not found.' }, 404);
     if (path === '/ringcentral/webhook') return json({ error: 'RingCentral live ingress is disabled.' }, 404);
     if (path === '/ringcentral/offline') {
       if (!local || env.RINGCENTRAL_OFFLINE_ENABLED !== 'true' || !ringCentralOffline) return json({ error: 'Offline receiver disabled.' }, 404);
@@ -60,6 +63,9 @@ export function createWorker(repositoryOverride?: ConversationRepository, ringCe
       catch (error) { return json({ error: 'Fictional event rejected or offline persistence unavailable.' }, error instanceof PersistenceError ? error.status : error instanceof InputError || error instanceof RingCentralEventError || error instanceof SyntaxError ? 400 : 503); }
     }
     if(path==='/telegram/webhook') return telegramWebhook(request,env,()=> {
+      // Production staff bot on the production database when configured; otherwise the development bot.
+      const production=productionStaffBot(env as ProductionEnvironment);
+      if(production)return production.bot;
       if(!dbConfig.configured || env.TELEGRAM_LIVE_ENABLED!=='true')throw new Error('Staff integration disabled.');
       return new StaffBot(new SupabaseStaffRepository(env),new BotAPITransport(env));
     });

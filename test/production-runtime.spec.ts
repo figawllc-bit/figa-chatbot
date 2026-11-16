@@ -118,3 +118,27 @@ describe('one RingCentral app for reading and replying', () => {
     expect(await run('ReadMessages', ['ReadMessages'])).toMatchObject({ status: 'ok' });
   });
 });
+
+describe('instant Telegram buttons via webhook', () => {
+  it('the public address serves only the secret-protected webhook', async () => {
+    const app = createWorker();
+    for (const [path, method] of [['/', 'GET'], ['/health', 'GET'], ['/chat', 'POST'], ['/conversations', 'POST'], ['/ringcentral/offline', 'POST']] as const)
+      expect((await app.fetch(new Request('https://figa-chatbot.example.workers.dev' + path, { method }), { FIGA_PUBLIC_WEBHOOK_ONLY: 'true' } as never)).status).toBe(404);
+    // Webhook path: still refused without the webhook switches and the matching secret header.
+    expect((await app.fetch(new Request('https://figa-chatbot.example.workers.dev/telegram/webhook', { method: 'POST' }), { FIGA_PUBLIC_WEBHOOK_ONLY: 'true' } as never)).status).toBe(404);
+    const env = { FIGA_PUBLIC_WEBHOOK_ONLY: 'true', TELEGRAM_STAFF_ENABLED: 'true', TELEGRAM_WEBHOOK_ENABLED: 'true', TELEGRAM_WEBHOOK_SECRET: 'x'.repeat(40) };
+    expect((await app.fetch(new Request('https://figa-chatbot.example.workers.dev/telegram/webhook', { method: 'POST', headers: { 'X-Telegram-Bot-Api-Secret-Token': 'wrong'.repeat(8) } }), env as never)).status).toBe(401);
+  });
+  it('registers the webhook with exactly the URL, secret and update types', async () => {
+    const { BotAPITransport } = await import('../src/telegram/transport');
+    const calls: { url: string; body: unknown }[] = [];
+    const t = new BotAPITransport({ TELEGRAM_STAFF_ENABLED: 'true', TELEGRAM_LIVE_ENABLED: 'true', TELEGRAM_BOT_TOKEN: '1234567:fictional_token_value_abcdef' },
+      (async (url: string, init: RequestInit) => { calls.push({ url, body: JSON.parse(String(init.body)) }); return Response.json({ ok: true, result: true }); }) as never);
+    await t.setWebhook('https://figa-chatbot.example.workers.dev/telegram/webhook', 's'.repeat(40));
+    expect(calls[0].url).toMatch(/\/setWebhook$/);
+    expect(calls[0].body).toEqual({ url: 'https://figa-chatbot.example.workers.dev/telegram/webhook', secret_token: 's'.repeat(40), allowed_updates: ['message', 'callback_query'], drop_pending_updates: false });
+    await expect(t.setWebhook('http://insecure.example/telegram/webhook', 's'.repeat(40))).rejects.toThrow();
+    await expect(t.setWebhook('https://figa-chatbot.example.workers.dev/telegram/webhook', 'short')).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+});

@@ -35,8 +35,12 @@ export interface ProductionEnvironment extends MonitoringEnvironment, AIEnvironm
   RINGCENTRAL_SMS_CLIENT_ID?: string;
   RINGCENTRAL_SMS_CLIENT_SECRET?: string;
   RINGCENTRAL_SMS_JWT?: string;
-  /** Poll Telegram getUpdates from the scheduled job (no public webhook URL needed). */
+  /** Enables the scheduled staff pass (alerts; and Telegram getUpdates when the webhook is off). */
   TELEGRAM_POLLING_ENABLED?: string;
+  /** Public HTTPS webhook URL (…/telegram/webhook). With TELEGRAM_WEBHOOK_ENABLED, button presses arrive instantly. */
+  TELEGRAM_WEBHOOK_URL?: string;
+  /** 'true' in production: the public address serves ONLY the Telegram webhook. */
+  FIGA_PUBLIC_WEBHOOK_ONLY?: string;
 }
 
 export interface ProductionReadiness {

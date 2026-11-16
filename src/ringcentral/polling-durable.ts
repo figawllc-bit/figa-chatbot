@@ -37,10 +37,11 @@ export class DurablePollingStore implements PollingStateStore {
   }
 }
 
-export interface StaffPollReport { status: 'disabled' | 'ok' | 'error'; processed: number; failure?: 'telegram' | 'database' | 'other'; httpStatus?: number | null; code?: string | null; keyCheck?: number | null; bot?: string | null; webhookSet?: boolean | null; smsApp?: string; results?: Record<string, number> }
+export interface StaffPollReport { status: 'disabled' | 'ok' | 'error'; processed: number; failure?: 'telegram' | 'database' | 'other'; httpStatus?: number | null; code?: string | null; keyCheck?: number | null; bot?: string | null; webhookSet?: boolean | null; smsApp?: string; webhook?: string; results?: Record<string, number> }
 export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
   private poller?: RingCentralIncomingPoller;
   private botIdentityLogged = false;
+  private webhookChecked = false;
   async poll(): Promise<PollReport> {
     const controls = pollingControls(this.env);
     if (!RINGCENTRAL_POLLING_LIVE_ENABLED || !controls.enabled || controls.paused || this.env.RINGCENTRAL_MONITORING_SECURITY_APPROVED !== 'true')
@@ -80,6 +81,25 @@ export class RingCentralMonitor extends DurableObject<ProductionEnvironment> {
   async staff(): Promise<StaffPollReport> {
     const staff = productionStaffBot(this.env);
     if (!staff) return { status: 'disabled', processed: 0 };
+    // Webhook mode: Telegram pushes button presses to /telegram/webhook instantly. getUpdates cannot run
+    // alongside a webhook, so this pass only (re)registers the webhook once per isolate and sends alerts.
+    const webhookUrl = this.env.TELEGRAM_WEBHOOK_ENABLED === 'true' ? this.env.TELEGRAM_WEBHOOK_URL ?? '' : '';
+    if (webhookUrl) {
+      try {
+        let webhook: string | undefined;
+        if (!this.webhookChecked) {
+          this.webhookChecked = true;
+          const current = (await staff.transport.getWebhookInfo()).url;
+          if (current !== webhookUrl) { await staff.transport.setWebhook(webhookUrl, this.env.TELEGRAM_WEBHOOK_SECRET ?? ''); webhook = 'registered'; }
+          else webhook = 'active';
+        }
+        await staff.bot.dispatch();
+        return { status: 'ok' as const, processed: 0, ...(webhook ? { webhook } : {}) };
+      } catch (error) {
+        this.webhookChecked = false;
+        return { status: 'error' as const, processed: 0, failure: error instanceof TelegramTransportError ? 'telegram' as const : error instanceof DatabaseError ? 'database' as const : 'other' as const };
+      }
+    }
     return this.ctx.blockConcurrencyWhile(async () => {
       const offset = (await this.ctx.storage.get<number>('telegram-offset')) ?? 0;
       try {

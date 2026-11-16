@@ -27,7 +27,7 @@ export class BotAPITransport implements TelegramTransport {
     api.notificationTest={allowSend,attempted:false,body:JSON.stringify(message)};
     return api;
   }
-  private async call(method:'sendMessage'|'answerCallbackQuery'|'getUpdates'|'getMe'|'getWebhookInfo',body:unknown):Promise<unknown> {
+  private async call(method:'sendMessage'|'answerCallbackQuery'|'getUpdates'|'getMe'|'getWebhookInfo'|'setWebhook',body:unknown):Promise<unknown> {
     if(!/^\d{5,20}:[A-Za-z0-9_-]{20,}$/.test(this.env.TELEGRAM_BOT_TOKEN??'')) throw new TelegramTransportError();
     if(this.notificationTest) {
       if(method!=='getMe') {
@@ -59,6 +59,11 @@ export class BotAPITransport implements TelegramTransport {
     const result=record(await this.call('getMe',{}));
     if(!Number.isSafeInteger(result.id)||Number(result.id)<=0||result.is_bot!==true||typeof result.username!=='string')throw new TelegramTransportError();
     return {id:Number(result.id),username:result.username,is_bot:true};
+  }
+  /** Points Telegram at our webhook; Telegram then sends that secret in X-Telegram-Bot-Api-Secret-Token. */
+  async setWebhook(url:string,secret:string):Promise<void> {
+    if(!/^https:\/\/[a-z0-9.-]+\/telegram\/webhook$/.test(url)||!/^[A-Za-z0-9_-]{32,256}$/.test(secret))throw new TelegramTransportError();
+    if(await this.call('setWebhook',{url,secret_token:secret,allowed_updates:['message','callback_query'],drop_pending_updates:false})!==true)throw new TelegramTransportError();
   }
   async getWebhookInfo():Promise<{url:string}> {
     const result=record(await this.call('getWebhookInfo',{}));

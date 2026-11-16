@@ -31,7 +31,8 @@
 		// (src/ringcentral/polling.ts) and RINGCENTRAL_SMS_DELIVERY_ENABLED (src/ringcentral/sms-sender.ts).
 		"production": {
 			"name": "figa-chatbot",
-			"workers_dev": false,
+			// Public workers.dev address for the Telegram webhook ONLY (FIGA_PUBLIC_WEBHOOK_ONLY); every other path is 404.
+			"workers_dev": true,
 			"preview_urls": false,
 			// Every minute: staff Telegram commands within ~1 minute; RingCentral polling self-limits to 120s.
 			"triggers": { "crons": ["* * * * *"] },
@@ -71,7 +72,10 @@
 				"TELEGRAM_STAFF_ENABLED": "true",
 				"TELEGRAM_LIVE_ENABLED": "true",
 				"TELEGRAM_POLLING_ENABLED": "true",
-				"TELEGRAM_WEBHOOK_ENABLED": "false"
+				// Instant buttons: Telegram pushes updates to the webhook (secret-protected); the bot registers it itself.
+				"TELEGRAM_WEBHOOK_ENABLED": "true",
+				"TELEGRAM_WEBHOOK_URL": "https://figa-chatbot.figawllc.workers.dev/telegram/webhook",
+				"FIGA_PUBLIC_WEBHOOK_ONLY": "true"
 			}
 		}
 	},

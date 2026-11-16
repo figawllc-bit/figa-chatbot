@@ -35,7 +35,7 @@ export async function scheduledStaff(env: MonitoringEnvironment & { TELEGRAM_POL
   if (env.TELEGRAM_POLLING_ENABLED !== 'true' || !env.RINGCENTRAL_MONITOR) return;
   const report = await env.RINGCENTRAL_MONITOR.get(env.RINGCENTRAL_MONITOR.idFromName(KEY)).staff();
   // Status and count only: no message text, IDs, tokens or Telegram bodies.
-  console.info('figa_staff_pass', { status: report.status, processed: report.processed, results: report.results ?? null, failure: report.failure ?? null, httpStatus: report.httpStatus ?? null, code: report.code ?? null, keyCheck: report.keyCheck ?? null, ...(report.bot !== undefined ? { bot: report.bot, webhookSet: report.webhookSet, smsApp: report.smsApp } : {}) });
+  console.info('figa_staff_pass', { status: report.status, processed: report.processed, webhook: report.webhook ?? null, results: report.results ?? null, failure: report.failure ?? null, httpStatus: report.httpStatus ?? null, code: report.code ?? null, keyCheck: report.keyCheck ?? null, ...(report.bot !== undefined ? { bot: report.bot, webhookSet: report.webhookSet, smsApp: report.smsApp } : {}) });
 }
 export async function scheduledMonitoring(env: MonitoringEnvironment, override?: Pick<RingCentralIncomingPoller, 'poll'>): Promise<void> {
   // No public HTTP route, no alarms, no Cron registration, no retry wrapper.
